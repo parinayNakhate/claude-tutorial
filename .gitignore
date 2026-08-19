@@ -6,3 +6,6 @@ __pycache__/
 .env
 .DS_Store
 .claude/plans/
+
+# Local Claude Code session transcripts
+file.md
