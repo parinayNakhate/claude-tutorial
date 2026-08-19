@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}Terms and Conditions — Spendly{% endblock %}
+
+{% block head %}
+<style>
+    .legal-section {
+        padding: 3rem 2rem 5rem;
+    }
+    .legal-inner {
+        max-width: 760px;
+        margin: 0 auto;
+    }
+    .legal-title {
+        font-family: var(--font-display);
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+    }
+    .legal-updated {
+        color: var(--ink-muted);
+        margin-bottom: 2.5rem;
+    }
+    .legal-inner h2 {
+        font-family: var(--font-display);
+        font-size: 1.4rem;
+        margin-top: 2.25rem;
+        margin-bottom: 0.75rem;
+        color: var(--accent);
+    }
+    .legal-inner p {
+        margin-bottom: 1rem;
+        color: var(--ink-soft);
+    }
+    .legal-inner ul {
+        margin: 0 0 1rem 1.25rem;
+        color: var(--ink-soft);
+    }
+    .legal-inner li {
+        margin-bottom: 0.4rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<section class="legal-section">
+    <div class="legal-inner">
+        <h1 class="legal-title">Terms and Conditions</h1>
+        <p class="legal-updated">Last updated: August 19, 2026</p>
+
+        <p>
+            Welcome to Spendly. These Terms and Conditions ("Terms") govern your
+            access to and use of the Spendly personal expense tracking application
+            ("Service"). By creating an account or otherwise using the Service, you
+            agree to be bound by these Terms.
+        </p>
+
+        <h2>Acceptance of Terms</h2>
+        <p>
+            By accessing or using Spendly, you confirm that you accept these Terms
+            and agree to comply with them. If you do not agree to these Terms, you
+            should not use the Service. We may update these Terms from time to
+            time, and continued use of the Service after changes are posted
+            constitutes acceptance of the revised Terms.
+        </p>
+
+        <h2>Use of Service</h2>
+        <p>
+            Spendly is provided to help you log, categorize, and review your
+            personal expenses. You agree to use the Service only for lawful
+            purposes and in a way that does not infringe the rights of, restrict,
+            or inhibit anyone else's use of the Service. You are responsible for:
+        </p>
+        <ul>
+            <li>Maintaining the confidentiality of your account credentials</li>
+            <li>All activity that occurs under your account</li>
+            <li>Ensuring the information you enter is accurate to the best of your knowledge</li>
+        </ul>
+        <p>
+            We reserve the right to suspend or terminate accounts that we
+            reasonably believe are being used in violation of these Terms.
+        </p>
+
+        <h2>User Data</h2>
+        <p>
+            The expense records, categories, and other information you enter into
+            Spendly belong to you. We store this data solely to provide you with
+            the Service, such as displaying your spending history and summaries.
+            We do not sell your personal financial data to third parties. You are
+            responsible for keeping your own backups of any information that is
+            important to you, as we do not guarantee against data loss.
+        </p>
+
+        <h2>Limitations of Liability</h2>
+        <p>
+            Spendly is provided on an "as is" and "as available" basis, without
+            warranties of any kind, express or implied. We do not guarantee that
+            the Service will be uninterrupted, error-free, or fully accurate.
+            Spendly is a personal finance tracking tool and does not constitute
+            financial, tax, or investment advice. To the fullest extent permitted
+            by law, Spendly and its creators shall not be liable for any indirect,
+            incidental, or consequential damages arising from your use of, or
+            inability to use, the Service.
+        </p>
+
+        <h2>Changes to Terms</h2>
+        <p>
+            We may revise these Terms at any time by updating this page. Material
+            changes will be reflected by an updated "Last updated" date above. It
+            is your responsibility to review these Terms periodically. Your
+            continued use of Spendly after any changes take effect constitutes
+            your acceptance of the new Terms.
+        </p>
+    </div>
+</section>
+
+{% endblock %}
