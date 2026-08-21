@@ -1,8 +1,10 @@
 """SQLite helpers for Spendly.
 
-get_db()  -- connection with dict-like rows and foreign key enforcement on
-init_db() -- create all tables (safe to call repeatedly)
-seed_db() -- insert demo data exactly once (safe to call repeatedly)
+get_db()            -- connection with dict-like rows and foreign key enforcement on
+init_db()           -- create all tables (safe to call repeatedly)
+seed_db()           -- insert demo data exactly once (safe to call repeatedly)
+get_user_by_email() -- look up a single user by their normalised email
+create_user()       -- hash a password and insert a new user
 """
 
 import calendar
@@ -144,5 +146,55 @@ def seed_db():
             rows,
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def get_user_by_email(email):
+    """Return the users row matching `email`, or None if there is no match.
+
+    The caller normalises the address with .strip().lower() before calling.
+    The UNIQUE index on users.email has no COLLATE NOCASE, so this comparison
+    is case-sensitive and only matches the exact form that was stored.
+    """
+    conn = get_db()
+    try:
+        # fetchone() runs inside the try so the row is materialised while the
+        # connection is open. sqlite3.Row holds plain values, so it stays
+        # readable after close().
+        return conn.execute(
+            "SELECT id, name, email, password_hash, created_at "
+            "FROM users WHERE email = ?",
+            (email,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+
+def create_user(name, email, password):
+    """Insert a new user and return the new row's id.
+
+    `password` arrives in plain text and is hashed here with
+    PASSWORD_HASH_METHOD, mirroring seed_db(), so no caller handles a raw hash.
+    `email` must already be normalised by the caller.
+
+    Raises sqlite3.IntegrityError if the email is taken. That is deliberate:
+    a check-then-insert in the caller is a race, so the UNIQUE constraint is
+    the real guard and the caller must handle it.
+    """
+    conn = get_db()
+    try:
+        cur = conn.execute(
+            "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",
+            (
+                name,
+                email,
+                generate_password_hash(password, method=PASSWORD_HASH_METHOD),
+            ),
+        )
+        # Without this the implicit transaction is discarded by close() and
+        # the insert is silently lost.
+        conn.commit()
+        return cur.lastrowid
     finally:
         conn.close()
