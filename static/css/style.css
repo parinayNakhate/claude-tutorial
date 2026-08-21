@@ -106,6 +106,17 @@ a { color: inherit; text-decoration: none; }
 .nav-links a { color: var(--ink-muted); transition: color 0.2s; }
 .nav-links a:hover { color: var(--ink); }
 
+/* The signed-in greeting. A span, not a link -- /profile is a Step 4 stub.
+   Same --ink-muted as .nav-links a: --ink-faint would read as a nicer label
+   but only clears 2.4:1 against --paper, under the 4.5:1 AA floor for text.
+   The lighter weight is what separates the name from the link beside it;
+   size comes from .nav-links. */
+.nav-user {
+    color: var(--ink-muted);
+    font-family: var(--font-body);
+    font-weight: 400;
+}
+
 .nav-cta {
     background: var(--ink) !important;
     color: var(--paper) !important;
@@ -540,6 +551,8 @@ a { color: inherit; text-decoration: none; }
 }
 
 @media (max-width: 600px) {
-    .nav-links a:not(.nav-cta) { display: none; }
+    /* Sign out is exempt: it is the only way out of a session on mobile, and
+       it cannot take .nav-cta -- that pill is reserved for conversion. */
+    .nav-links a:not(.nav-cta):not(.nav-signout) { display: none; }
     .hero { padding: 3rem 1rem 2rem; }
 }

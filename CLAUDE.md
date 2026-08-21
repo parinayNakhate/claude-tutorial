@@ -11,7 +11,7 @@ Spendly is a lightweight personal expense tracker built with Flask and SQLite.
 spendly/
 ├── app.py              # All routes — single file, no blueprints
 ├── database/
-│   └── db.py           # SQLite helpers: get_db(), init_db(), seed_db()
+│   └── db.py           # SQLite helpers: get_db(), init_db(), seed_db(), user lookups
 ├── templates/
 │   ├── base.html       # Shared layout — all templates must extend this
 │   └── *.html          # One template per page
@@ -95,8 +95,8 @@ pytest -s
 |---|---|
 | `GET /` | Implemented — renders `landing.html` |
 | `GET /register` | Implemented — renders `register.html` |
-| `GET /login` | Implemented — renders `login.html` |
-| `GET /logout` | Stub — Step 3 |
+| `GET, POST /login` | Implemented — renders `login.html`, verifies credentials, opens the session |
+| `GET /logout` | Implemented — clears the session, redirects to `/login?logged_out=1` |
 | `GET /profile` | Stub — Step 4 |
 | `GET /expenses/add` | Stub — Step 7 |
 | `GET /expenses/<id>/edit` | Stub — Step 8 |
@@ -113,7 +113,8 @@ pytest -s
 - **Never put DB logic in route functions** — it belongs in `database/db.py`
 - **Never install new packages** mid-feature without flagging it — keep `requirements.txt` in sync
 - **Never use JS frameworks** — the frontend is intentionally vanilla
-- **`database/db.py` provides `get_db()`, `init_db()`, `seed_db()`** (Step 1, done) — plus `CATEGORIES` and `DB_PATH`. Callers of `get_db()` must close the connection themselves; there is no `flask.g` caching yet
+- **`database/db.py` provides `get_db()`, `init_db()`, `seed_db()`, `get_user_by_email()`, `create_user()`** (Steps 1–2, done) — plus `CATEGORIES`, `DB_PATH` and `PASSWORD_HASH_METHOD`. Callers of `get_db()` must close the connection themselves; there is no `flask.g` caching yet. There is no `get_user_by_id()` yet — Step 4 will need one
+- **Sessions carry exactly `user_id` and `user_name`** (Step 3) — the cookie is signed, not encrypted, so never put an email, password or hash in it. `app.secret_key` is set at module level in `app.py`; moving it under `__main__` silently breaks every session under `flask run` and pytest alike
 - **The DB file is `spendly.db`** in the project root — `.gitignore` covers it via `*.db`, so never commit it
 - **FK enforcement is manual** — SQLite foreign keys are off by default; `get_db()` must run `PRAGMA foreign_keys = ON` on every connection
 - The app runs on **port 5001**, not the Flask default 5000 — don't change this
