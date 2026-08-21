@@ -48,7 +48,8 @@ spendly/
 - **SQLite only** — no PostgreSQL, no SQLAlchemy ORM, no external DB
 - **Vanilla JS only** — no React, no jQuery, no npm packages
 - **No new pip packages** — work within `requirements.txt` as-is unless explicitly told otherwise
-- Python 3.10+ assumed — f-strings and `match` statements are fine
+- **Python 3.9** — that is what `venv/` actually runs. f-strings are fine, but no `match` statements and no `X | Y` type unions
+- **`werkzeug.security` must hash with `pbkdf2:sha256`** — the default (scrypt) raises `AttributeError: module 'hashlib' has no attribute 'scrypt'` on this Python build
 
 ---
 
@@ -112,6 +113,7 @@ pytest -s
 - **Never put DB logic in route functions** — it belongs in `database/db.py`
 - **Never install new packages** mid-feature without flagging it — keep `requirements.txt` in sync
 - **Never use JS frameworks** — the frontend is intentionally vanilla
-- **`database/db.py` is currently empty** — do not assume helpers exist until the step that implements them
+- **`database/db.py` provides `get_db()`, `init_db()`, `seed_db()`** (Step 1, done) — plus `CATEGORIES` and `DB_PATH`. Callers of `get_db()` must close the connection themselves; there is no `flask.g` caching yet
+- **The DB file is `spendly.db`** in the project root — `.gitignore` covers it via `*.db`, so never commit it
 - **FK enforcement is manual** — SQLite foreign keys are off by default; `get_db()` must run `PRAGMA foreign_keys = ON` on every connection
 - The app runs on **port 5001**, not the Flask default 5000 — don't change this
