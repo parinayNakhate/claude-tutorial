@@ -173,7 +173,7 @@ def test_form_actions_resolve_through_url_for(app):
 
 def test_stub_routes_are_untouched(client):
     expected = {
-        "/logout": "Logout — coming in Step 3",
+        # /logout left this table in Step 3, when it became a real route.
         "/profile": "Profile page — coming in Step 4",
         "/expenses/add": "Add expense — coming in Step 7",
         "/expenses/1/edit": "Edit expense — coming in Step 8",
