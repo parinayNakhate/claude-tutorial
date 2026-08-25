@@ -18,7 +18,8 @@ spendly/
 ├── static/
 │   ├── css/
 │   │   ├── style.css       # Global styles
-│   │   └── landing.css     # Landing-page-only styles
+│   │   ├── landing.css     # Landing-page-only styles
+│   │   └── profile.css     # Profile-page-only styles
 │   └── js/
 │       └── main.js         # Vanilla JS only
 └── requirements.txt
@@ -95,9 +96,9 @@ pytest -s
 |---|---|
 | `GET /` | Implemented — renders `landing.html` |
 | `GET /register` | Implemented — renders `register.html` |
-| `GET, POST /login` | Implemented — renders `login.html`, verifies credentials, opens the session |
+| `GET, POST /login` | Implemented — renders `login.html`, verifies credentials, opens the session, redirects to `/profile` |
 | `GET /logout` | Implemented — clears the session, redirects to `/login?logged_out=1` |
-| `GET /profile` | Stub — Step 4 |
+| `GET /profile` | Implemented — renders `profile.html`, requires a session; data is still hardcoded (Step 5 wires the DB) |
 | `GET /expenses/add` | Stub — Step 7 |
 | `GET /expenses/<id>/edit` | Stub — Step 8 |
 | `GET /expenses/<id>/delete` | Stub — Step 9 |
@@ -113,7 +114,10 @@ pytest -s
 - **Never put DB logic in route functions** — it belongs in `database/db.py`
 - **Never install new packages** mid-feature without flagging it — keep `requirements.txt` in sync
 - **Never use JS frameworks** — the frontend is intentionally vanilla
-- **`database/db.py` provides `get_db()`, `init_db()`, `seed_db()`, `get_user_by_email()`, `create_user()`** (Steps 1–2, done) — plus `CATEGORIES`, `DB_PATH` and `PASSWORD_HASH_METHOD`. Callers of `get_db()` must close the connection themselves; there is no `flask.g` caching yet. There is no `get_user_by_id()` yet — Step 4 will need one
+- **`database/db.py` provides `get_db()`, `init_db()`, `seed_db()`, `get_user_by_email()`, `create_user()`** (Steps 1–2, done) — plus `CATEGORIES`, `DB_PATH` and `PASSWORD_HASH_METHOD`. Callers of `get_db()` must close the connection themselves; there is no `flask.g` caching yet. There is no `get_user_by_id()` yet — Step 4 turned out not to need one (it renders hardcoded data), so **Step 5** will add it when `/profile` is wired to the database
+- **`/profile` renders hardcoded data** (Step 4) — the `_PROFILE_*` constants near the top of `app.py` mirror `_SEED_EXPENSES` in `database/db.py` on purpose, so a seeded database renders the same page. Step 5 deletes that block and replaces it with real queries; keep the two in sync until then. The `rupees` Jinja filter lives beside them — **all money is ₹, never `$`**
+- **`/profile` is where a signed-in user lands** (Step 4) — a successful login redirects there, and so do the "already signed in" guards on `/login` and `/register`. `GET /` deliberately still renders the landing page while signed in, so it stays reachable
+- **The nav greeting links to `/profile`** (Step 4) — it is an `<a class="nav-user">`, not a span, and the `@media (max-width: 600px)` rule in `style.css` exempts it explicitly. Adding a `.nav-user` variant means checking that selector
 - **Sessions carry exactly `user_id` and `user_name`** (Step 3) — the cookie is signed, not encrypted, so never put an email, password or hash in it. `app.secret_key` is set at module level in `app.py`; moving it under `__main__` silently breaks every session under `flask run` and pytest alike
 - **The DB file is `spendly.db`** in the project root — `.gitignore` covers it via `*.db`, so never commit it
 - **FK enforcement is manual** — SQLite foreign keys are off by default; `get_db()` must run `PRAGMA foreign_keys = ON` on every connection

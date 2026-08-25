@@ -1,0 +1,299 @@
+/* ------------------------------------------------------------------ */
+/* Profile page                                                        */
+/*                                                                     */
+/* Loaded only by templates/profile.html, via {% block head %}, after  */
+/* style.css -- so every --token defined there is available here and   */
+/* none are redefined. No hex literals: the palette is already made.   */
+/* Two things style.css has no token for, noted where they are used:   */
+/* pill radius (written 999px, as .hero-badge already does) and        */
+/* elevation (a 1px --border rule, like .auth-card, rather than a      */
+/* box-shadow -- rgba() would be a literal colour).                    */
+/* ------------------------------------------------------------------ */
+
+.profile-section {
+    padding: 3rem 2rem 4rem;
+}
+
+.profile-inner {
+    /* Wider than --auth-width's 440px: this is a content page with a
+       four-column table, not a form. */
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+/* ---------------------------------- */
+/* 1. Identity header                  */
+/* ---------------------------------- */
+
+.profile-header {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.profile-avatar {
+    flex-shrink: 0;
+    width: 72px;
+    height: 72px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-light);
+    color: var(--accent);
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    line-height: 1;
+    border-radius: 999px;
+}
+
+.profile-name {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    color: var(--ink);
+    margin-bottom: 0.25rem;
+}
+
+.profile-email {
+    font-size: 0.95rem;
+    color: var(--ink-soft);
+}
+
+.profile-member {
+    font-size: 0.85rem;
+    color: var(--ink-muted);
+}
+
+/* ---------------------------------- */
+/* 2. Summary stats                    */
+/* ---------------------------------- */
+
+.profile-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.profile-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    background: var(--paper-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1.25rem 1.5rem;
+}
+
+.profile-stat-label {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--ink-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.profile-stat-value {
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    line-height: 1.2;
+    color: var(--ink);
+}
+
+/* ---------------------------------- */
+/* Shared card shell                   */
+/* ---------------------------------- */
+
+/* Same recipe as .auth-card in style.css, so the two read as siblings. */
+.profile-card {
+    background: var(--paper-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1.75rem 2rem;
+    margin-bottom: 1.5rem;
+}
+
+.profile-card-title {
+    font-family: var(--font-display);
+    font-size: 1.2rem;
+    font-weight: 400;
+    color: var(--ink);
+    margin-bottom: 1.25rem;
+}
+
+/* ---------------------------------- */
+/* 3. Transaction table                */
+/* ---------------------------------- */
+
+/* The project has no table styling anywhere, so this is all new. The wrapper
+   is what keeps a four-column table off the page's horizontal scrollbar on a
+   narrow screen -- the table scrolls inside its own box instead. */
+.profile-table-wrap {
+    overflow-x: auto;
+}
+
+.profile-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+.profile-table th {
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--ink-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 0 1rem 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.profile-table td {
+    padding: 0.85rem 1rem 0.85rem 0;
+    color: var(--ink-soft);
+    border-bottom: 1px solid var(--border-soft);
+}
+
+.profile-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.profile-table td:last-child,
+.profile-table th:last-child {
+    padding-right: 0;
+}
+
+.profile-col-date {
+    color: var(--ink-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.profile-col-amount {
+    text-align: right;
+    color: var(--ink);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------- */
+/* Category badges                     */
+/* ---------------------------------- */
+
+.profile-badge {
+    display: inline-block;
+    padding: 0.2rem 0.7rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+/* Seven categories, six light/dark token pairs in style.css -- Other reuses
+   Entertainment's background with quieter text rather than inventing a hex. */
+.profile-badge-food          { background: var(--accent-light);   color: var(--accent); }
+.profile-badge-transport     { background: var(--accent-2-light); color: var(--accent-2); }
+.profile-badge-bills         { background: var(--danger-light);   color: var(--danger); }
+.profile-badge-health        { background: var(--success-light);  color: var(--success); }
+.profile-badge-entertainment { background: var(--paper-warm);     color: var(--ink-soft); }
+.profile-badge-shopping      { background: var(--border-soft);    color: var(--ink-soft); }
+.profile-badge-other         { background: var(--paper-warm);     color: var(--ink-muted); }
+
+/* ---------------------------------- */
+/* 4. Category breakdown bars          */
+/* ---------------------------------- */
+
+.profile-breakdown {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+}
+
+.profile-bar-row {
+    display: grid;
+    grid-template-columns: 110px 1fr 90px;
+    align-items: center;
+    gap: 1rem;
+}
+
+.profile-bar-label {
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+}
+
+.profile-bar-track {
+    display: block;
+    height: 10px;
+    background: var(--paper-warm);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.profile-bar-fill {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    /* width is set inline from the data -- it is a value, not a style choice */
+}
+
+/* One distinct token per category; all seven are solid palette colours. */
+.profile-bar-fill-food          { background: var(--accent); }
+.profile-bar-fill-transport     { background: var(--accent-2); }
+.profile-bar-fill-bills         { background: var(--danger); }
+.profile-bar-fill-health        { background: var(--success); }
+.profile-bar-fill-entertainment { background: var(--ink-soft); }
+.profile-bar-fill-shopping      { background: var(--ink-muted); }
+.profile-bar-fill-other         { background: var(--ink-faint); }
+
+.profile-bar-amount {
+    text-align: right;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------- */
+/* Responsive                          */
+/* ---------------------------------- */
+
+/* 700px matches where landing.css collapses its own stat grid. */
+@media (max-width: 700px) {
+    .profile-stats { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 600px) {
+    .profile-section { padding: 2rem 1rem 3rem; }
+
+    .profile-header {
+        flex-direction: column;
+        text-align: center;
+        gap: 1rem;
+    }
+
+    .profile-card { padding: 1.25rem; }
+
+    /* Labels above the bars: 110px of category name plus a track plus an
+       amount does not fit, and squeezing the track to nothing loses the
+       one thing this section exists to show. */
+    .profile-bar-row {
+        grid-template-columns: 1fr auto;
+        gap: 0.35rem 1rem;
+    }
+
+    .profile-bar-track { grid-column: 1 / -1; order: 3; }
+}
+
+/* ---------------------------------- */
+/* Empty states                        */
+/* ---------------------------------- */
+
+/* Unreachable with the static data, but the template's {% else %} branches
+   render this the moment Step 5 meets an account with no expenses. */
+.profile-empty {
+    padding: 1.5rem;
+    text-align: center;
+    font-size: 0.9rem;
+    color: var(--ink-muted);
+}
