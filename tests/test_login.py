@@ -99,12 +99,13 @@ def test_get_login_still_renders_the_form(client):
 # The happy path                                                      #
 # ------------------------------------------------------------------ #
 
-def test_successful_login_redirects_to_landing(client):
+def test_successful_login_redirects_to_the_profile(client):
     _create_user()
     response = _login(client)
     assert response.status_code == 302
-    # Werkzeug 3 emits a relative Location.
-    assert response.headers["Location"] == "/"
+    # Werkzeug 3 emits a relative Location. /profile replaced the landing page
+    # as the post-login target in Step 4, once it stopped being a stub.
+    assert response.headers["Location"] == "/profile"
 
 
 def test_successful_login_writes_exactly_two_session_keys(client):
@@ -246,12 +247,12 @@ def test_failed_login_shows_no_success_banner(client):
 # Already signed in                                                   #
 # ------------------------------------------------------------------ #
 
-def test_get_login_while_signed_in_redirects_to_landing(client):
+def test_get_login_while_signed_in_redirects_to_the_profile(client):
     # Pre-seeded rather than posted, so this does not depend on login working.
     _sign_in(client)
     response = client.get("/login")
     assert response.status_code == 302
-    assert response.headers["Location"] == "/"
+    assert response.headers["Location"] == "/profile"
 
 
 def test_post_login_while_signed_in_does_not_touch_the_session(client):
@@ -261,15 +262,15 @@ def test_post_login_while_signed_in_does_not_touch_the_session(client):
     _sign_in(client, user_id=99, user_name="Someone Else")
     response = _login(client)
     assert response.status_code == 302
-    assert response.headers["Location"] == "/"
+    assert response.headers["Location"] == "/profile"
     assert _session(client) == {"user_id": 99, "user_name": "Someone Else"}
 
 
-def test_get_register_while_signed_in_redirects_to_landing(client):
+def test_get_register_while_signed_in_redirects_to_the_profile(client):
     _sign_in(client)
     response = client.get("/register")
     assert response.status_code == 302
-    assert response.headers["Location"] == "/"
+    assert response.headers["Location"] == "/profile"
 
 
 def test_post_register_while_signed_in_creates_no_account(client):
@@ -284,7 +285,7 @@ def test_post_register_while_signed_in_creates_no_account(client):
         },
     )
     assert response.status_code == 302
-    assert response.headers["Location"] == "/"
+    assert response.headers["Location"] == "/profile"
     assert db.get_user_by_email("interloper@example.com") is None
 
 

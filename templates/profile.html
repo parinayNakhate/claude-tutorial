@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Profile — Spendly{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/profile.css') }}">
+{% endblock %}
+
+{% block content %}
+
+{# The name is the one live value on this page -- everything else is static
+   until Step 5. Split once here so the heading and the avatar cannot drift. #}
+{% set name_parts = (session.user_name or '').split() %}
+{% set initials = (name_parts[0][0] ~ name_parts[-1][0]) if name_parts | length > 1
+                  else (name_parts[0][0] if name_parts else '?') %}
+
+<section class="profile-section">
+    <div class="profile-inner">
+
+        <!-- 1. Who you are -->
+        <header class="profile-header">
+            <div class="profile-avatar" aria-hidden="true">{{ initials | upper }}</div>
+            <div class="profile-identity">
+                <h1 class="profile-name">{{ session.user_name }}</h1>
+                <p class="profile-email">{{ email }}</p>
+                <p class="profile-member">Member since {{ member_since }}</p>
+            </div>
+        </header>
+
+        <!-- 2. The headline numbers -->
+        <div class="profile-stats">
+            <div class="profile-stat">
+                <span class="profile-stat-label">Total spent</span>
+                <span class="profile-stat-value">{{ summary.total | rupees }}</span>
+            </div>
+            <div class="profile-stat">
+                <span class="profile-stat-label">Transactions</span>
+                <span class="profile-stat-value">{{ summary.count }}</span>
+            </div>
+            <div class="profile-stat">
+                <span class="profile-stat-label">Top category</span>
+                <span class="profile-stat-value">{{ summary.top_category }}</span>
+            </div>
+        </div>
+
+        <!-- 3. Recent activity -->
+        <div class="profile-card">
+            <h2 class="profile-card-title">Recent transactions</h2>
+            <div class="profile-table-wrap">
+                <table class="profile-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Date</th>
+                            <th scope="col">Description</th>
+                            <th scope="col">Category</th>
+                            <th scope="col" class="profile-col-amount">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for expense in expenses %}
+                        <tr>
+                            <td class="profile-col-date">
+                                <time datetime="{{ expense.date }}">{{ expense.date | day }}</time>
+                            </td>
+                            <td>{{ expense.description }}</td>
+                            <td>
+                                {# Colour comes from the modifier class, never an
+                                   inline style -- the seven categories are a
+                                   closed set defined in database/db.py. #}
+                                <span class="profile-badge profile-badge-{{ expense.category | lower }}">
+                                    {{ expense.category }}
+                                </span>
+                            </td>
+                            <td class="profile-col-amount">{{ expense.amount | rupees }}</td>
+                        </tr>
+                        {% else %}
+                        {# Cannot fire with static data. Here for Step 5, where a
+                           brand-new account has nothing to list. #}
+                        <tr>
+                            <td colspan="4" class="profile-empty">No transactions yet.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 4. Where the money went -->
+        <div class="profile-card">
+            <h2 class="profile-card-title">Spending by category</h2>
+            <div class="profile-breakdown">
+                {% for row in breakdown %}
+                <div class="profile-bar-row">
+                    <span class="profile-bar-label">{{ row.category }}</span>
+                    {# The width is data, not decoration, so it has to be an
+                       inline value; the fill colour still comes from a class.
+                       role/aria-label because a bare div says nothing aloud. #}
+                    <span class="profile-bar-track" role="img"
+                          aria-label="{{ row.category }}: {{ row.percent }} percent of total spending">
+                        <span class="profile-bar-fill profile-bar-fill-{{ row.category | lower }}"
+                              style="width: {{ row.percent }}%"></span>
+                    </span>
+                    <span class="profile-bar-amount">{{ row.amount | rupees }}</span>
+                </div>
+                {% else %}
+                <p class="profile-empty">Nothing to break down yet.</p>
+                {% endfor %}
+            </div>
+        </div>
+
+    </div>
+</section>
+
+{% endblock %}

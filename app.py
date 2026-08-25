@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from datetime import datetime
 
 from flask import Flask, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
@@ -26,6 +27,107 @@ with app.app_context():
 
 
 # ------------------------------------------------------------------ #
+# Static demo data — Step 4 design pass                               #
+# ------------------------------------------------------------------ #
+
+# /profile is built against hardcoded data so the layout can be settled before
+# any query exists; Step 5 swaps in the real thing. These rows mirror
+# _SEED_EXPENSES in database/db.py exactly -- same amounts, categories,
+# descriptions and dates -- so a seeded database renders an identical page and
+# any visual change at that point is a genuine regression, not new data.
+# Delete this whole block when /profile is wired to the database.
+_PROFILE_EMAIL = "demo@spendly.com"
+_PROFILE_MEMBER_SINCE = "January 2026"
+
+# Newest first, the order a real ORDER BY date DESC would return.
+_PROFILE_EXPENSES = (
+    {"date": "2026-08-25", "description": "Gift for a colleague",
+     "category": "Other", "amount": 500.00},
+    {"date": "2026-08-22", "description": "Dinner with friends",
+     "category": "Food", "amount": 275.00},
+    {"date": "2026-08-19", "description": "Running shoes",
+     "category": "Shopping", "amount": 2299.00},
+    {"date": "2026-08-16", "description": "Movie tickets",
+     "category": "Entertainment", "amount": 350.00},
+    {"date": "2026-08-12", "description": "Pharmacy - monthly medicines",
+     "category": "Health", "amount": 640.00},
+    {"date": "2026-08-09", "description": "Electricity bill",
+     "category": "Bills", "amount": 1850.00},
+    {"date": "2026-08-06", "description": "Metro card top-up",
+     "category": "Transport", "amount": 120.00},
+    {"date": "2026-08-03", "description": "Groceries at the local market",
+     "category": "Food", "amount": 450.00},
+)
+
+
+def _category_totals(expenses):
+    """Return (category, total) pairs, largest first.
+
+    A plain dict would order by insertion in 3.7+, but the bars need to be
+    sorted by size anyway, so the sort is doing the real work here.
+    """
+    totals = {}
+    for expense in expenses:
+        totals[expense["category"]] = (
+            totals.get(expense["category"], 0) + expense["amount"]
+        )
+    return sorted(totals.items(), key=lambda pair: pair[1], reverse=True)
+
+
+_PROFILE_TOTAL = sum(expense["amount"] for expense in _PROFILE_EXPENSES)
+
+_PROFILE_SUMMARY = {
+    "total": _PROFILE_TOTAL,
+    "count": len(_PROFILE_EXPENSES),
+    # First element of the sorted pairs -- never hardcoded, so editing
+    # _PROFILE_EXPENSES above cannot leave this stat lying.
+    "top_category": _category_totals(_PROFILE_EXPENSES)[0][0],
+}
+
+# `or 1` guards the division: an empty _PROFILE_EXPENSES would make the total
+# zero, and a ZeroDivisionError at import time would take the whole app down
+# rather than just emptying the chart.
+_PROFILE_BREAKDOWN = tuple(
+    {
+        "category": category,
+        "amount": amount,
+        "percent": int(round(amount / (_PROFILE_TOTAL or 1) * 100)),
+    }
+    for category, amount in _category_totals(_PROFILE_EXPENSES)
+)
+
+
+@app.template_filter("rupees")
+def rupees(value):
+    """Format a number as INR with thousands separators: 6484.0 -> ₹6,484.00.
+
+    Spendly is rupees throughout -- there is no currency setting and no other
+    symbol should ever reach a template. Western grouping rather than the
+    lakh/crore form: the two agree below six digits, and stdlib has no Indian
+    grouping without a locale that is not guaranteed to be installed.
+    """
+    return "₹{:,.2f}".format(value)
+
+
+@app.template_filter("day")
+def day(value):
+    """Format a stored YYYY-MM-DD date for display: 2026-08-25 -> 25 Aug 2026.
+
+    SQLite keeps expenses.date as TEXT in exactly this shape, so Step 5 can
+    pass its rows straight through. Anything unparseable falls back to the raw
+    string -- a malformed date should look wrong in one table cell, not raise
+    mid-render and take the whole page down.
+    """
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return value
+    # Day built by hand rather than with %-d: that flag is glibc/BSD only and
+    # blows up on Windows, which CLAUDE.md's setup notes still support.
+    return "{} {}".format(parsed.day, parsed.strftime("%b %Y"))
+
+
+# ------------------------------------------------------------------ #
 # Routes                                                              #
 # ------------------------------------------------------------------ #
 
@@ -41,7 +143,7 @@ def register():
     # let a signed-in visitor create a second account by submitting the form
     # directly, which is the hole a GET-only guard leaves open.
     if session.get("user_id"):
-        return redirect(url_for("landing"))
+        return redirect(url_for("profile"))
 
     if request.method == "GET":
         return render_template("register.html")
@@ -86,7 +188,7 @@ def login():
     # Same guard as register(), for the same reason: outside the method
     # branch so a signed-in POST cannot silently overwrite the session.
     if session.get("user_id"):
-        return redirect(url_for("landing"))
+        return redirect(url_for("profile"))
 
     if request.method == "GET":
         # `registered` and `logged_out` are set by the redirects out of
@@ -131,10 +233,12 @@ def login():
         # email, password or hash -- the cookie is signed, not encrypted.
         session["user_id"] = user["id"]
         session["user_name"] = user["name"]
-        # Redirect, never render, so a refresh does not resubmit. The landing
-        # page is a placeholder destination: /profile is still a Step 4 stub
-        # returning a raw string. This moves when the dashboard arrives.
-        return redirect(url_for("landing"))
+        # Redirect, never render, so a refresh does not resubmit (Post/Redirect/
+        # Get, same as register()). Signing in lands on /profile: the landing
+        # page was only ever a placeholder target, chosen in Step 3 because
+        # /profile was still a stub returning a raw string. It renders now, so
+        # this is the destination Step 3's spec said would replace it.
+        return redirect(url_for("profile"))
 
     return render_template("login.html", error=error, email=email)
 
@@ -150,6 +254,32 @@ def logout():
     return redirect(url_for("login", logged_out=1))
 
 
+@app.route("/profile")
+def profile():
+    # The inverse of the guard in login() and register(): those two turn a
+    # signed-in visitor away, this one turns an anonymous visitor away. A
+    # redirect rather than abort(401) because someone who is simply not signed
+    # in has an obvious next action, and it is the sign-in form. No ?next=
+    # parameter -- an unvalidated one is an open redirect, and nothing here
+    # needs it yet.
+    # TODO: extract to a login_required decorator once Steps 7-9 add the
+    # expense routes; with one call site it would be dead abstraction today.
+    if not session.get("user_id"):
+        return redirect(url_for("login"))
+
+    # Everything except the name is static (Step 4 is a design pass). The name
+    # is read from the session by the template itself, exactly as base.html
+    # already does -- passing it here would just shadow the same value.
+    return render_template(
+        "profile.html",
+        email=_PROFILE_EMAIL,
+        member_since=_PROFILE_MEMBER_SINCE,
+        expenses=_PROFILE_EXPENSES,
+        summary=_PROFILE_SUMMARY,
+        breakdown=_PROFILE_BREAKDOWN,
+    )
+
+
 @app.route("/terms")
 def terms():
     return render_template("terms.html")
@@ -163,11 +293,6 @@ def privacy():
 # ------------------------------------------------------------------ #
 # Placeholder routes — students will implement these                  #
 # ------------------------------------------------------------------ #
-
-@app.route("/profile")
-def profile():
-    return "Profile page — coming in Step 4"
-
 
 @app.route("/expenses/add")
 def add_expense():
