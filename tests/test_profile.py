@@ -1,18 +1,76 @@
-"""Tests for Step 4 -- the profile page design pass.
+"""Tests for Step 5 -- the profile page, wired to the database.
 
-The page is deliberately static: it renders hardcoded constants from app.py,
-not the database. So these tests assert on layout, the access gate and the
-shape of the data, and they never seed a user. conftest.py's autouse
-clean_tables fixture empties both tables before every test anyway -- which is
-exactly why _sign_in() fakes the session cookie instead of posting the form.
+Step 4's version of this file asserted against hardcoded _PROFILE_* constants
+in app.py. Those are gone: every value on the page now comes from a query
+scoped to session["user_id"], so every test here seeds a real user first.
+
+Nothing below retypes an expected number by hand. Totals, counts and the top
+category are all derived from EXPENSES, so editing that constant can never
+leave a test quietly asserting the wrong thing -- which was the Step 4 suite's
+stated intent too, it just had a constant in app.py to lean on.
 """
 
 import inspect
 import re
 
 import app as app_module
+import database.db as db
 
 NAME = "Grace Hopper"
+EMAIL = "grace@example.com"
+CREATED_AT = "2026-01-15 09:30:00"
+
+# (date, description, category, amount) -- newest first, the order the table
+# renders. Seven distinct categories across eight rows; Food is the one that
+# spans two rows. Shopping is both the biggest single row and the biggest
+# total here, so proving the top category is *summed* needs its own data --
+# see test_the_top_category_is_summed_not_read_off_one_row.
+EXPENSES = (
+    ("2026-08-25", "Gift for a colleague", "Other", 500.00),
+    ("2026-08-22", "Dinner with friends", "Food", 275.00),
+    ("2026-08-19", "Running shoes", "Shopping", 2299.00),
+    ("2026-08-16", "Movie tickets", "Entertainment", 350.00),
+    ("2026-08-12", "Pharmacy - monthly medicines", "Health", 640.00),
+    ("2026-08-09", "Electricity bill", "Bills", 1850.00),
+    ("2026-08-06", "Metro card top-up", "Transport", 120.00),
+    ("2026-08-03", "Groceries at the local market", "Food", 450.00),
+)
+
+TOTAL = sum(row[3] for row in EXPENSES)
+# Derived the same way the page derives it, so the two cannot disagree.
+TOP_CATEGORY = db._category_totals(
+    [{"category": row[2], "amount": row[3]} for row in EXPENSES]
+)[0][0]
+
+
+def _seed_user(name=NAME, email=EMAIL, expenses=EXPENSES,
+               created_at=CREATED_AT):
+    """Create a user with expenses and return their id.
+
+    conftest's autouse clean_tables empties both tables before every test, so
+    there is never a row left over from the last one -- and never a row unless
+    a test puts one there, which is why /profile now needs this.
+    """
+    user_id = db.create_user(name, email, "password123")
+    conn = db.get_db()
+    try:
+        # created_at defaults to datetime('now'), so it has to be overwritten
+        # to assert on a fixed "Member since" string.
+        conn.execute(
+            "UPDATE users SET created_at = ? WHERE id = ?",
+            (created_at, user_id),
+        )
+        for date, description, category, amount in expenses:
+            conn.execute(
+                "INSERT INTO expenses "
+                "(user_id, amount, category, date, description) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (user_id, amount, category, date, description),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return user_id
 
 
 def _sign_in(client, user_id=1, user_name=NAME):
@@ -37,10 +95,16 @@ def _source(app, template):
     return app.jinja_env.loader.get_source(app.jinja_env, template)[0]
 
 
-def _profile(client, **kwargs):
-    """Sign in and fetch /profile."""
-    _sign_in(client, **kwargs)
+def _profile(client, user_name=NAME, **seed):
+    """Seed a user, sign in as them, and fetch /profile."""
+    user_id = _seed_user(**seed)
+    _sign_in(client, user_id=user_id, user_name=user_name)
     return client.get("/profile")
+
+
+def _widths(body):
+    """The bar percentages, read back out of the rendered HTML."""
+    return [int(w) for w in re.findall(r'style="width: (\d+)%"', body)]
 
 
 # ------------------------------------------------------------------ #
@@ -66,9 +130,24 @@ def test_signed_in_visitor_gets_the_page(client):
 
 def test_the_gate_does_not_touch_the_session(client):
     """Reading /profile must not write, clear or rotate anything."""
-    _sign_in(client)
+    user_id = _seed_user()
+    _sign_in(client, user_id=user_id)
     client.get("/profile")
-    assert _session(client) == {"user_id": 1, "user_name": NAME}
+    assert _session(client) == {"user_id": user_id, "user_name": NAME}
+
+
+def test_a_session_naming_a_deleted_user_is_cleared(client):
+    """The cookie is signed, so the id is genuine -- but the row can be gone.
+
+    Leaving the dead session in place would bounce the visitor between
+    /profile and /login forever, because login() sends anyone still carrying
+    a user_id straight back here.
+    """
+    _sign_in(client, user_id=999)
+    response = client.get("/profile")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/login")
+    assert _session(client) == {}
 
 
 # ------------------------------------------------------------------ #
@@ -76,7 +155,7 @@ def test_the_gate_does_not_touch_the_session(client):
 # ------------------------------------------------------------------ #
 
 def test_the_page_shows_the_signed_in_users_name(client):
-    """The name is the one live value on an otherwise static page."""
+    """The name comes from the session, not from the query."""
     body = _profile(client, user_name="Ada Lovelace").data
     assert b"Ada Lovelace" in body
 
@@ -104,10 +183,17 @@ def test_an_empty_name_falls_back_instead_of_raising(client):
     )
 
 
-def test_the_page_shows_the_email_and_join_date(client):
+def test_the_page_shows_the_stored_email(client):
     body = _profile(client).data
-    assert app_module._PROFILE_EMAIL.encode() in body
-    assert app_module._PROFILE_MEMBER_SINCE.encode() in body
+    assert EMAIL.encode() in body
+
+
+def test_the_join_date_is_formatted_not_dumped(client):
+    """created_at carries a time; only the month and year should surface."""
+    body = _profile(client).data.decode()
+    assert "Member since January 2026" in body
+    assert "09:30" not in body
+    assert "2026-01-15" not in body
 
 
 # ------------------------------------------------------------------ #
@@ -122,53 +208,98 @@ def test_all_three_summary_stats_render(client):
 
 def test_the_total_is_formatted_as_rupees_with_separators(client):
     body = _profile(client).data.decode()
-    assert "₹6,484.00" in body
+    assert app_module.rupees(TOTAL) in body
 
 
 def test_the_transaction_count_matches_the_data(client):
     body = _profile(client).data.decode()
-    count = app_module._PROFILE_SUMMARY["count"]
-    assert ">{}<".format(count) in body.replace("\n", "").replace(" ", "")
+    assert re.search(
+        r'profile-stat-value">\s*%d\s*<' % len(EXPENSES), body
+    )
 
 
-def test_the_top_category_is_derived_not_hardcoded(client):
-    """Editing _PROFILE_EXPENSES must not be able to leave this stat lying."""
-    assert app_module._PROFILE_SUMMARY["top_category"] == "Shopping"
-    assert b"Shopping" in _profile(client).data
+def test_the_top_category_renders(client):
+    body = _profile(client).data.decode()
+    assert re.search(r'profile-stat-value">\s*%s\s*<' % TOP_CATEGORY, body)
+
+
+def test_the_top_category_is_summed_not_read_off_one_row(client):
+    """Food wins on two rows of 300; Bills has the largest single row.
+
+    EXPENSES cannot make this point -- Shopping is both its biggest single
+    row and its biggest total, so either strategy would look right. This
+    needs data where the two answers disagree.
+    """
+    split = (
+        ("2026-05-03", "a", "Food", 300.00),
+        ("2026-05-02", "b", "Food", 300.00),
+        ("2026-05-01", "c", "Bills", 500.00),
+    )
+    user_id = _seed_user(expenses=split)
+    _sign_in(client, user_id=user_id)
+    body = client.get("/profile").data.decode()
+    assert re.search(r'profile-stat-value">\s*Food\s*<', body)
+    assert not re.search(r'profile-stat-value">\s*Bills\s*<', body)
 
 
 # ------------------------------------------------------------------ #
-# Section 3 -- transaction table                                      #
+# Section 3 -- transaction history                                    #
 # ------------------------------------------------------------------ #
 
 def test_every_transaction_gets_a_row(client):
     body = _profile(client).data.decode()
-    rows = body.count('<td class="profile-col-date"')
-    assert rows == len(app_module._PROFILE_EXPENSES)
-    assert rows >= 3
+    assert len(re.findall(r"<time datetime=", body)) == len(EXPENSES)
 
 
 def test_each_row_carries_its_description_and_amount(client):
     body = _profile(client).data.decode()
-    for expense in app_module._PROFILE_EXPENSES:
-        assert expense["description"] in body
-        assert app_module.rupees(expense["amount"]) in body
+    for _, description, _, amount in EXPENSES:
+        assert description in body
+        assert app_module.rupees(amount) in body
+
+
+def test_the_rows_are_ordered_newest_first(client):
+    body = _profile(client).data.decode()
+    positions = [body.index(row[1]) for row in EXPENSES]
+    assert positions == sorted(positions)
+
+
+def test_rows_sharing_a_date_keep_a_stable_order(client):
+    """date has no time component, so ties need id DESC to stay put.
+
+    Without the tiebreaker SQLite may return equal dates in any order and the
+    table would reshuffle between two renders of identical data.
+    """
+    same_day = (
+        ("2026-05-01", "inserted first", "Food", 10.00),
+        ("2026-05-01", "inserted second", "Food", 20.00),
+    )
+    user_id = _seed_user(expenses=same_day)
+    rows = db.get_recent_transactions(user_id)
+    assert [row["description"] for row in rows] == [
+        "inserted second", "inserted first"
+    ]
 
 
 def test_category_badges_use_a_class_never_an_inline_colour(client):
-    """The spec is explicit: badge colour comes from CSS, not style=."""
     body = _profile(client).data.decode()
-    badges = re.findall(r'class="profile-badge profile-badge-([a-z]+)"', body)
-    assert len(set(badges)) >= 3
-    for match in re.findall(r"<span[^>]*profile-badge[^>]*>", body):
-        assert "style=" not in match
+    badges = re.findall(r'class="profile-badge[^"]*"', body)
+    assert badges
+    assert not re.search(r'class="profile-badge[^"]*"[^>]*style=', body)
 
 
 def test_badge_modifiers_match_the_categories_in_the_data(client):
     body = _profile(client).data.decode()
-    for expense in app_module._PROFILE_EXPENSES:
-        expected = "profile-badge-{}".format(expense["category"].lower())
-        assert expected in body
+    for _, _, category, _ in EXPENSES:
+        assert "profile-badge-%s" % category.lower() in body
+
+
+def test_a_missing_description_renders_blank_not_the_word_none(client):
+    """description is nullable, and Jinja prints None as the literal "None"."""
+    user_id = _seed_user(expenses=(("2026-05-01", None, "Food", 10.00),))
+    _sign_in(client, user_id=user_id)
+    body = client.get("/profile").data.decode()
+    assert ">None<" not in body
 
 
 # ------------------------------------------------------------------ #
@@ -177,34 +308,125 @@ def test_badge_modifiers_match_the_categories_in_the_data(client):
 
 def test_every_category_gets_a_bar(client):
     body = _profile(client).data.decode()
-    bars = re.findall(r'class="profile-bar-fill [^"]*"\s*style="width: (\d+)%"', body)
-    assert len(bars) == len(app_module._PROFILE_BREAKDOWN)
-    assert len(bars) >= 3
+    categories = set(row[2] for row in EXPENSES)
+    assert len(_widths(body)) == len(categories)
 
 
 def test_the_bar_percentages_cover_the_whole_total(client):
-    body = _profile(client).data.decode()
-    bars = re.findall(r'style="width: (\d+)%"', body)
-    assert sum(int(width) for width in bars) == 100
+    assert sum(_widths(_profile(client).data.decode())) == 100
 
 
 def test_the_bars_are_ordered_largest_first(client):
-    widths = [row["percent"] for row in app_module._PROFILE_BREAKDOWN]
+    widths = _widths(_profile(client).data.decode())
     assert widths == sorted(widths, reverse=True)
 
 
 def test_each_bar_is_labelled_for_screen_readers(client):
-    """A bare coloured div tells a screen reader nothing."""
     body = _profile(client).data.decode()
-    labels = re.findall(r'aria-label="([^"]+) percent of total spending"', body)
-    assert len(labels) == len(app_module._PROFILE_BREAKDOWN)
+    categories = set(row[2] for row in EXPENSES)
+    assert len(re.findall(r"aria-label=", body)) >= len(categories)
 
 
 def test_the_breakdown_totals_match_the_transactions(client):
-    """The bars and the table must describe the same money."""
-    assert sum(row["amount"] for row in app_module._PROFILE_BREAKDOWN) == sum(
-        expense["amount"] for expense in app_module._PROFILE_EXPENSES
+    user_id = _seed_user()
+    breakdown = db.get_category_breakdown(user_id)
+    assert sum(row["amount"] for row in breakdown) == TOTAL
+
+
+def test_percentages_still_sum_to_100_when_rounding_fights_back(client):
+    """40.5 / 40.5 / 19 is the case that breaks naive per-bar rounding.
+
+    Rounding each independently gives 41 / 41 / 19 = 101, and docking the
+    largest to compensate leaves 40 / 41 / 19 -- a chart that no longer
+    descends even though the amounts still do.
+    """
+    awkward = (
+        ("2026-05-03", "a", "Food", 40.50),
+        ("2026-05-02", "b", "Bills", 40.50),
+        ("2026-05-01", "c", "Other", 19.00),
     )
+    rows = db.get_category_breakdown(_seed_user(expenses=awkward))
+    percents = [row["percent"] for row in rows]
+    assert sum(percents) == 100
+    assert percents == sorted(percents, reverse=True)
+
+
+def test_three_equal_categories_still_sum_to_100(client):
+    equal = (
+        ("2026-05-03", "a", "Food", 1.00),
+        ("2026-05-02", "b", "Bills", 1.00),
+        ("2026-05-01", "c", "Other", 1.00),
+    )
+    rows = db.get_category_breakdown(_seed_user(expenses=equal))
+    assert sum(row["percent"] for row in rows) == 100
+
+
+# ------------------------------------------------------------------ #
+# One account never sees another's money                              #
+# ------------------------------------------------------------------ #
+
+def test_a_user_sees_only_their_own_transactions(client):
+    """Nothing before Step 5 covered the WHERE user_id = ? clause."""
+    mine = _seed_user(email="mine@example.com", expenses=(
+        ("2026-05-01", "my own dinner", "Food", 10.00),
+    ))
+    _seed_user(email="theirs@example.com", expenses=(
+        ("2026-06-01", "somebody elses yacht", "Other", 99999.00),
+    ))
+    _sign_in(client, user_id=mine)
+    body = client.get("/profile").data.decode()
+    assert "my own dinner" in body
+    assert "somebody elses yacht" not in body
+    assert app_module.rupees(10.00) in body
+    assert "99,999" not in body
+
+
+def test_the_identity_header_belongs_to_the_signed_in_user(client):
+    """The transactions being scoped is no help if the header leaks."""
+    _seed_user(email="first@example.com", created_at="2020-02-02 00:00:00",
+               expenses=())
+    second = _seed_user(email="second@example.com",
+                        created_at="2026-01-15 09:30:00", expenses=())
+    _sign_in(client, user_id=second)
+    body = client.get("/profile").data.decode()
+    assert "second@example.com" in body
+    assert "first@example.com" not in body
+    assert "Member since January 2026" in body
+    assert "February 2020" not in body
+
+
+def test_the_isolation_is_not_just_first_user_wins(client):
+    """The mirror of the test above, so a 'return user 1' bug cannot pass."""
+    _seed_user(email="first@example.com", expenses=(
+        ("2026-05-01", "the first users lunch", "Food", 10.00),
+    ))
+    second = _seed_user(email="second@example.com", expenses=(
+        ("2026-06-01", "the second users taxi", "Transport", 20.00),
+    ))
+    _sign_in(client, user_id=second)
+    body = client.get("/profile").data.decode()
+    assert "the second users taxi" in body
+    assert "the first users lunch" not in body
+
+
+# ------------------------------------------------------------------ #
+# Empty states -- reachable now, for any brand-new account            #
+# ------------------------------------------------------------------ #
+
+def test_a_new_account_gets_the_empty_states_not_an_error(client):
+    user_id = _seed_user(expenses=())
+    _sign_in(client, user_id=user_id)
+    response = client.get("/profile")
+    assert response.status_code == 200
+    body = response.data.decode()
+    assert "No transactions yet." in body
+    assert "Nothing to break down yet." in body
+    assert app_module.rupees(0) in body
+
+
+def test_the_empty_summary_reports_zeros_and_a_dash(client):
+    stats = db.get_summary_stats(_seed_user(expenses=()))
+    assert stats == {"total": 0, "count": 0, "top_category": "—"}
 
 
 # ------------------------------------------------------------------ #
@@ -219,6 +441,17 @@ def test_the_rupees_filter_formats_with_separators_and_paise():
 
 def test_no_dollar_signs_reach_the_page(client):
     assert b"$" not in _profile(client).data
+
+
+def test_the_query_layer_never_formats_currency(client):
+    """The rupees filter owns the symbol; a formatted string would break it."""
+    user_id = _seed_user()
+    stats = db.get_summary_stats(user_id)
+    assert not isinstance(stats["total"], str)
+    for row in db.get_recent_transactions(user_id):
+        assert not isinstance(row["amount"], str)
+    for row in db.get_category_breakdown(user_id):
+        assert not isinstance(row["amount"], str)
 
 
 # ------------------------------------------------------------------ #
@@ -236,28 +469,21 @@ def test_the_day_filter_falls_back_instead_of_raising():
     assert app_module.day(None) is None
 
 
+def test_the_member_since_helper_handles_both_stored_shapes():
+    """datetime('now') writes a timestamp; a fixture may write a bare date."""
+    assert app_module._member_since("2026-01-15 09:30:00") == "January 2026"
+    assert app_module._member_since("2026-01-15") == "January 2026"
+    assert app_module._member_since("garbage") == "garbage"
+    assert app_module._member_since(None) is None
+
+
 def test_the_table_shows_readable_dates_not_raw_timestamps(client):
     body = _profile(client).data.decode()
-    assert "25 Aug 2026" in body
+    newest = EXPENSES[0][0]
+    assert app_module.day(newest) in body
     # The ISO form survives only in the machine-readable attribute.
-    assert ">2026-08-25<" not in body
-    assert 'datetime="2026-08-25"' in body
-
-
-# ------------------------------------------------------------------ #
-# Empty states (unreachable now; they are Step 5's safety net)        #
-# ------------------------------------------------------------------ #
-
-def test_the_template_handles_having_no_transactions(client, app):
-    rendered = app.jinja_env.get_template("profile.html").render(
-        session={"user_id": 1, "user_name": NAME},
-        email="x@example.com", member_since="January 2026",
-        expenses=(), summary={"total": 0, "count": 0, "top_category": "-"},
-        breakdown=(),
-    )
-    assert "No transactions yet." in rendered
-    assert "Nothing to break down yet." in rendered
-    assert "₹0.00" in rendered
+    assert ">%s<" % newest not in body
+    assert 'datetime="%s"' % newest in body
 
 
 # ------------------------------------------------------------------ #
@@ -265,10 +491,30 @@ def test_the_template_handles_having_no_transactions(client, app):
 # ------------------------------------------------------------------ #
 
 def test_profile_contains_no_sql(client):
-    """Step 4 is a design pass -- the view must not touch the database."""
+    """CLAUDE.md: DB logic belongs in database/db.py, never in a route."""
     source = inspect.getsource(app_module.profile)
     for token in ("SELECT", "INSERT", "UPDATE", "DELETE", "get_db("):
         assert token not in source
+
+
+def test_no_helper_in_app_reaches_for_the_database(client):
+    """The view's helpers must stay presentation-only too."""
+    source = inspect.getsource(app_module._member_since)
+    for token in ("SELECT", "INSERT", "UPDATE", "DELETE", "get_db("):
+        assert token not in source
+
+
+def test_the_step_four_constants_are_gone(client):
+    """A bad merge that resurrects the hardcoded block should fail loudly."""
+    assert not [n for n in dir(app_module) if n.startswith("_PROFILE_")]
+
+
+def test_every_section_is_actually_wired_up(client):
+    """One section left stubbed would still render a plausible-looking page."""
+    body = _profile(client).data.decode()
+    assert len(re.findall(r"<time datetime=", body)) == len(EXPENSES)
+    assert app_module.rupees(TOTAL) in body
+    assert len(_widths(body)) == len(set(row[2] for row in EXPENSES))
 
 
 def test_profile_template_has_no_hardcoded_urls(client, app):

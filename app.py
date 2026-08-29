@@ -5,7 +5,16 @@ from datetime import datetime
 from flask import Flask, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 
-from database.db import create_user, get_user_by_email, init_db, seed_db
+from database.db import (
+    create_user,
+    get_category_breakdown,
+    get_recent_transactions,
+    get_summary_stats,
+    get_user_by_email,
+    get_user_by_id,
+    init_db,
+    seed_db,
+)
 
 app = Flask(__name__)
 
@@ -27,74 +36,34 @@ with app.app_context():
 
 
 # ------------------------------------------------------------------ #
-# Static demo data — Step 4 design pass                               #
+# Profile page helpers                                                #
 # ------------------------------------------------------------------ #
 
-# /profile is built against hardcoded data so the layout can be settled before
-# any query exists; Step 5 swaps in the real thing. These rows mirror
-# _SEED_EXPENSES in database/db.py exactly -- same amounts, categories,
-# descriptions and dates -- so a seeded database renders an identical page and
-# any visual change at that point is a genuine regression, not new data.
-# Delete this whole block when /profile is wired to the database.
-_PROFILE_EMAIL = "demo@spendly.com"
-_PROFILE_MEMBER_SINCE = "January 2026"
-
-# Newest first, the order a real ORDER BY date DESC would return.
-_PROFILE_EXPENSES = (
-    {"date": "2026-08-25", "description": "Gift for a colleague",
-     "category": "Other", "amount": 500.00},
-    {"date": "2026-08-22", "description": "Dinner with friends",
-     "category": "Food", "amount": 275.00},
-    {"date": "2026-08-19", "description": "Running shoes",
-     "category": "Shopping", "amount": 2299.00},
-    {"date": "2026-08-16", "description": "Movie tickets",
-     "category": "Entertainment", "amount": 350.00},
-    {"date": "2026-08-12", "description": "Pharmacy - monthly medicines",
-     "category": "Health", "amount": 640.00},
-    {"date": "2026-08-09", "description": "Electricity bill",
-     "category": "Bills", "amount": 1850.00},
-    {"date": "2026-08-06", "description": "Metro card top-up",
-     "category": "Transport", "amount": 120.00},
-    {"date": "2026-08-03", "description": "Groceries at the local market",
-     "category": "Food", "amount": 450.00},
-)
+# Step 4's _PROFILE_* constants used to live here. They are gone: /profile
+# reads real data now, through the per-section query helpers in
+# database/db.py. Only the presentation bits stay on this side.
 
 
-def _category_totals(expenses):
-    """Return (category, total) pairs, largest first.
+def _member_since(created_at):
+    """Format a stored users.created_at as "January 2026".
 
-    A plain dict would order by insertion in 3.7+, but the bars need to be
-    sorted by size anyway, so the sort is doing the real work here.
+    users.created_at is written by SQLite's datetime('now') default, so it
+    arrives as "YYYY-MM-DD HH:MM:SS" -- with a time component, which is why
+    this cannot reuse the `day` filter: that one parses "%Y-%m-%d" only, so
+    it would hit its raw-string fallback and print seconds into the page
+    header. The bare date form is accepted too, so a fixture or a hand-written
+    row that stored only "2026-01-15" still formats.
+
+    Anything unparseable comes back untouched, mirroring `day`: a malformed
+    timestamp should spoil one line of the header, not raise mid-render and
+    take the whole page down.
     """
-    totals = {}
-    for expense in expenses:
-        totals[expense["category"]] = (
-            totals.get(expense["category"], 0) + expense["amount"]
-        )
-    return sorted(totals.items(), key=lambda pair: pair[1], reverse=True)
-
-
-_PROFILE_TOTAL = sum(expense["amount"] for expense in _PROFILE_EXPENSES)
-
-_PROFILE_SUMMARY = {
-    "total": _PROFILE_TOTAL,
-    "count": len(_PROFILE_EXPENSES),
-    # First element of the sorted pairs -- never hardcoded, so editing
-    # _PROFILE_EXPENSES above cannot leave this stat lying.
-    "top_category": _category_totals(_PROFILE_EXPENSES)[0][0],
-}
-
-# `or 1` guards the division: an empty _PROFILE_EXPENSES would make the total
-# zero, and a ZeroDivisionError at import time would take the whole app down
-# rather than just emptying the chart.
-_PROFILE_BREAKDOWN = tuple(
-    {
-        "category": category,
-        "amount": amount,
-        "percent": int(round(amount / (_PROFILE_TOTAL or 1) * 100)),
-    }
-    for category, amount in _category_totals(_PROFILE_EXPENSES)
-)
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(created_at, fmt).strftime("%B %Y")
+        except (TypeError, ValueError):
+            continue
+    return created_at
 
 
 @app.template_filter("rupees")
@@ -267,16 +236,28 @@ def profile():
     if not session.get("user_id"):
         return redirect(url_for("login"))
 
-    # Everything except the name is static (Step 4 is a design pass). The name
-    # is read from the session by the template itself, exactly as base.html
-    # already does -- passing it here would just shadow the same value.
+    user_id = session["user_id"]
+    user = get_user_by_id(user_id)
+
+    # The cookie is signed, so the id is genuine -- but the row it names can
+    # be gone, an account removed while its owner was still signed in. Clear
+    # the session before redirecting: login() sends anyone still carrying a
+    # user_id straight back here, so a stale session left in place would
+    # bounce between the two pages forever.
+    if user is None:
+        session.clear()
+        return redirect(url_for("login"))
+
+    # One call per section of the page. The name is read from the session by
+    # the template itself, exactly as base.html already does -- passing it
+    # here would just shadow the same value.
     return render_template(
         "profile.html",
-        email=_PROFILE_EMAIL,
-        member_since=_PROFILE_MEMBER_SINCE,
-        expenses=_PROFILE_EXPENSES,
-        summary=_PROFILE_SUMMARY,
-        breakdown=_PROFILE_BREAKDOWN,
+        email=user["email"],
+        member_since=_member_since(user["created_at"]),
+        expenses=get_recent_transactions(user_id),
+        summary=get_summary_stats(user_id),
+        breakdown=get_category_breakdown(user_id),
     )
 
 
