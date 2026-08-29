@@ -4,7 +4,14 @@ get_db()            -- connection with dict-like rows and foreign key enforcemen
 init_db()           -- create all tables (safe to call repeatedly)
 seed_db()           -- insert demo data exactly once (safe to call repeatedly)
 get_user_by_email() -- look up a single user by their normalised email
+get_user_by_id()    -- look up a single user by their primary key
 create_user()       -- hash a password and insert a new user
+
+Profile page queries, one per section (Step 5):
+
+get_recent_transactions() -- one user's expenses, newest first
+get_summary_stats()       -- one user's total, transaction count and top category
+get_category_breakdown()  -- one user's spending per category, largest first
 """
 
 import calendar
@@ -171,6 +178,30 @@ def get_user_by_email(email):
         conn.close()
 
 
+def get_user_by_id(user_id):
+    """Return the users row matching `user_id`, or None if there is no match.
+
+    `user_id` comes from session["user_id"]. That cookie is signed, so the
+    value is genuine -- but genuine is not the same as current: an account
+    removed while its owner was still signed in leaves a valid cookie
+    pointing at a row that is gone. None is an ordinary answer here, not an
+    error, and every caller has to handle it.
+
+    password_hash is deliberately not read. Only login() needs it, and a hash
+    that never leaves this module cannot end up in a template context.
+    """
+    conn = get_db()
+    try:
+        # fetchone() inside the try for the same reason as get_user_by_email():
+        # the row is materialised while the connection is still open.
+        return conn.execute(
+            "SELECT id, name, email, created_at FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+
 def create_user(name, email, password):
     """Insert a new user and return the new row's id.
 
@@ -198,3 +229,176 @@ def create_user(name, email, password):
         return cur.lastrowid
     finally:
         conn.close()
+
+
+# ------------------------------------------------------------------ #
+# Profile page queries -- Step 5                                      #
+# ------------------------------------------------------------------ #
+
+# One helper per section of /profile. They are deliberately independent --
+# none of them takes another's output -- so each can be read, tested and
+# changed on its own and the view assembles the page from three plain calls.
+
+
+def _category_totals(rows):
+    """Return (category, total) pairs, largest first.
+
+    A plain dict would order by insertion in 3.7+, but the bars need to be
+    sorted by size anyway, so the sort is doing the real work here.
+
+    Shared by the summary and the breakdown, which is why it sits above both
+    rather than inside either one: two copies could drift and leave the
+    headline "top category" naming a different bar than the chart shows.
+
+    Rows subscript by column name exactly like dicts, so this works on
+    sqlite3.Row and on hand-written dicts in tests without a branch.
+    """
+    totals = {}
+    for row in rows:
+        totals[row["category"]] = totals.get(row["category"], 0) + row["amount"]
+    return sorted(totals.items(), key=lambda pair: pair[1], reverse=True)
+
+
+def get_recent_transactions(user_id, limit=10):
+    """Return `user_id`'s most recent expenses, newest first.
+
+    One dict per expense with exactly the four keys profile.html reads:
+    `date` (the stored YYYY-MM-DD string, handed straight to the `day`
+    filter), `description`, `category` and `amount` (a number -- the `rupees`
+    filter adds the symbol, so nothing here formats currency).
+
+    Returns [] for a user with no expenses; the template's {% else %} branch
+    renders the empty state.
+    """
+    conn = get_db()
+    try:
+        # date is a bare YYYY-MM-DD string with no time component, so several
+        # rows routinely share a day. id DESC breaks those ties by insertion
+        # order -- without it SQLite may hand back equal dates in any order
+        # and the table would reshuffle itself between two renders of
+        # identical data.
+        rows = conn.execute(
+            "SELECT id, amount, category, date, description "
+            "FROM expenses WHERE user_id = ? "
+            "ORDER BY date DESC, id DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+        # Built inside the try for the same reason as get_user_by_email():
+        # the rows are materialised while the connection is still open.
+        # description is nullable, and a None would reach Jinja and print the
+        # literal word "None" into a cell for the user to read, so it is
+        # squashed to "" here rather than in every template that shows it.
+        return [
+            {
+                "date": row["date"],
+                "description": row["description"] or "",
+                "category": row["category"],
+                "amount": row["amount"],
+            }
+            for row in rows
+        ]
+    finally:
+        conn.close()
+
+
+def get_summary_stats(user_id):
+    """Return the three headline stats profile.html reads.
+
+    Exactly three keys, named for the template: `total` (number, summed --
+    the `rupees` filter formats it), `count` (int) and `top_category` (str).
+
+    An account with no expenses gets zeros and an em dash rather than an
+    exception: a brand-new user landing on /profile is the normal first
+    experience, not an edge case.
+    """
+    conn = get_db()
+    try:
+        # Only the two columns the stats are derived from. The transaction
+        # list is its own query, so pulling dates and descriptions through
+        # here as well would buy nothing.
+        rows = conn.execute(
+            "SELECT amount, category FROM expenses WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+        # Everything below runs inside the try for the same reason as
+        # get_user_by_email(): the rows are materialised while the connection
+        # is still open.
+        if not rows:
+            # No rows means no categories, so _category_totals() comes back
+            # empty and indexing it would raise on a brand-new account.
+            return {"total": 0, "count": 0, "top_category": "\u2014"}
+        return {
+            "total": sum(row["amount"] for row in rows),
+            "count": len(rows),
+            # Read off the shared helper rather than summed again here, so
+            # this headline can never name a different category than the
+            # first bar of the breakdown chart.
+            "top_category": _category_totals(rows)[0][0],
+        }
+    finally:
+        conn.close()
+
+
+def get_category_breakdown(user_id):
+    """Return one bar per category for `user_id`, largest first.
+
+    One dict per category with the three keys profile.html reads:
+    `category` (str), `amount` (number, formatted by the `rupees` filter) and
+    `percent` (int -- it goes straight into style="width: N%", so it must be
+    a whole number). Every amount reaching this table today is positive, so
+    every percent is too; refunds would need a negative amount, which no
+    route can create until Step 7 adds one, and Step 7 has to decide what a
+    negative bar even means before this can promise anything about them.
+
+    Whenever the total is above zero the percents sum to exactly 100: the
+    bars claim to cover the whole of the spending, so they have to. Returns
+    [] for a user with no expenses.
+    """
+    conn = get_db()
+    try:
+        # Only the two columns the bars are built from. The date and the
+        # description belong to the transaction table, not the chart.
+        rows = conn.execute(
+            "SELECT amount, category FROM expenses WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+        # Aggregated inside the try, as in get_user_by_email(): the rows are
+        # consumed while the connection is still open.
+        totals = _category_totals(rows)
+    finally:
+        conn.close()
+
+    grand_total = sum(amount for _, amount in totals)
+    if grand_total <= 0:
+        # An account whose expenses all total zero still has categories to
+        # name, but no share to divide between them, so the bars render
+        # empty instead of dividing by zero.
+        return [
+            {"category": category, "amount": amount, "percent": 0}
+            for category, amount in totals
+        ]
+
+    # Largest-remainder: floor every share, then hand the leftover points
+    # out one each by biggest discarded fraction. Rounding each bar on its
+    # own and docking the leader for the excess is the tempting shortcut and
+    # it is wrong -- 40.5 / 40.5 / 19 rounds to 41 / 41 / 19 = 101, and
+    # taking the point back off the first bar leaves 40 / 41 / 19, a chart
+    # that no longer descends even though the amounts still do.
+    shares = [amount * 100.0 / grand_total for _, amount in totals]
+    percents = [int(share) for share in shares]
+    # Floors only ever undershoot, so every leftover point finds a home.
+    # sorted() is stable, so tied fractions keep their existing order and the
+    # larger bar is never passed over for a smaller one.
+    ranked = sorted(
+        range(len(shares)),
+        key=lambda i: shares[i] - percents[i],
+        reverse=True,
+    )
+    for i in ranked[:100 - sum(percents)]:
+        percents[i] += 1
+
+    return [
+        {"category": category, "amount": amount, "percent": percent}
+        for (category, amount), percent in zip(totals, percents)
+    ]
+

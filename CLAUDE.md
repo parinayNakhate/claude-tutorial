@@ -98,7 +98,7 @@ pytest -s
 | `GET /register` | Implemented — renders `register.html` |
 | `GET, POST /login` | Implemented — renders `login.html`, verifies credentials, opens the session, redirects to `/profile` |
 | `GET /logout` | Implemented — clears the session, redirects to `/login?logged_out=1` |
-| `GET /profile` | Implemented — renders `profile.html`, requires a session; data is still hardcoded (Step 5 wires the DB) |
+| `GET /profile` | Implemented — renders `profile.html` from the database, scoped to `session["user_id"]`; requires a session |
 | `GET /expenses/add` | Stub — Step 7 |
 | `GET /expenses/<id>/edit` | Stub — Step 8 |
 | `GET /expenses/<id>/delete` | Stub — Step 9 |
@@ -114,8 +114,9 @@ pytest -s
 - **Never put DB logic in route functions** — it belongs in `database/db.py`
 - **Never install new packages** mid-feature without flagging it — keep `requirements.txt` in sync
 - **Never use JS frameworks** — the frontend is intentionally vanilla
-- **`database/db.py` provides `get_db()`, `init_db()`, `seed_db()`, `get_user_by_email()`, `create_user()`** (Steps 1–2, done) — plus `CATEGORIES`, `DB_PATH` and `PASSWORD_HASH_METHOD`. Callers of `get_db()` must close the connection themselves; there is no `flask.g` caching yet. There is no `get_user_by_id()` yet — Step 4 turned out not to need one (it renders hardcoded data), so **Step 5** will add it when `/profile` is wired to the database
-- **`/profile` renders hardcoded data** (Step 4) — the `_PROFILE_*` constants near the top of `app.py` mirror `_SEED_EXPENSES` in `database/db.py` on purpose, so a seeded database renders the same page. Step 5 deletes that block and replaces it with real queries; keep the two in sync until then. The `rupees` Jinja filter lives beside them — **all money is ₹, never `$`**
+- **`database/db.py` provides `get_db()`, `init_db()`, `seed_db()`, `get_user_by_email()`, `create_user()`** (Steps 1–2) and **`get_user_by_id()`** (Step 5) — plus `CATEGORIES`, `DB_PATH` and `PASSWORD_HASH_METHOD`. Callers of `get_db()` must close the connection themselves; there is no `flask.g` caching yet
+- **The `/profile` queries live in `database/db.py`** (Step 5) — `get_recent_transactions()`, `get_summary_stats()` and `get_category_breakdown()`, one per page section, each filtering `WHERE user_id = ?`, plus the shared private `_category_totals()`. They are deliberately independent — none takes another's output — so **Steps 7–9 extend these three, they do not add a fourth path**. All three return raw numbers: the `rupees` Jinja filter in `app.py` owns the symbol, so **never format currency in the query layer**. `get_recent_transactions()` orders by `date DESC, id DESC` — the tiebreaker is load-bearing, `date` has no time component. `get_category_breakdown()` uses largest-remainder rounding so percentages sum to 100 *and* stay descending; rounding each bar independently breaks one or the other
+- **`/profile` is DB-backed** (Step 5) — the Step 4 `_PROFILE_*` constants are gone. `profile()` must stay free of SQL (a test greps its source, comments included); `_member_since()` in `app.py` formats `users.created_at`, which is `"YYYY-MM-DD HH:MM:SS"` and so cannot use the `day` filter. A session naming a deleted user gets `session.clear()` then a redirect — leaving it set would bounce between `/profile` and `/login` forever. **All money is ₹, never `$`**
 - **`/profile` is where a signed-in user lands** (Step 4) — a successful login redirects there, and so do the "already signed in" guards on `/login` and `/register`. `GET /` deliberately still renders the landing page while signed in, so it stays reachable
 - **The nav greeting links to `/profile`** (Step 4) — it is an `<a class="nav-user">`, not a span, and the `@media (max-width: 600px)` rule in `style.css` exempts it explicitly. Adding a `.nav-user` variant means checking that selector
 - **Sessions carry exactly `user_id` and `user_name`** (Step 3) — the cookie is signed, not encrypted, so never put an email, password or hash in it. `app.secret_key` is set at module level in `app.py`; moving it under `__main__` silently breaks every session under `flask run` and pytest alike
