@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Add expense — Spendly{% endblock %}
+
+{% block content %}
+
+{# No {% block head %}: this page is the auth-form shell exactly as
+   register.html builds it, and every class it uses already lives in
+   style.css. A page-scoped stylesheet here would carry two rules and one
+   real temptation -- appearance: none on the <select>, which then needs a
+   caret drawn from an embedded SVG, which is a hex literal. #}
+
+<section class="auth-section">
+    <div class="auth-container">
+
+        <div class="auth-header">
+            <h1 class="auth-title">Add an expense</h1>
+            <p class="auth-subtitle">Log what you spent and where it went</p>
+        </div>
+
+        <div class="auth-card">
+            {% if error %}
+            <div class="auth-error">{{ error }}</div>
+            {% endif %}
+
+            <form method="POST" action="{{ url_for('add_expense') }}">
+                <div class="form-group">
+                    <label for="amount">Amount</label>
+                    {# No ₹ inside the box: the value posted has to parse as a
+                       plain number, and the `rupees` filter puts the symbol
+                       back wherever the amount is read. step="0.01" so paise
+                       are accepted; min is the browser's copy of the server
+                       rule, never a replacement for it. #}
+                    <input type="number" id="amount" name="amount"
+                           class="form-input" placeholder="450.00"
+                           step="0.01" min="0.01"
+                           value="{{ amount or '' }}" required autofocus>
+                </div>
+                <div class="form-group">
+                    <label for="category">Category</label>
+                    {# The seven come from CATEGORIES in database/db.py, the
+                       same tuple the view validates against, so this list and
+                       the badge colours on /profile cannot drift apart. No
+                       blank placeholder option: the field is required and a
+                       select always has a value, so an eighth entry that is
+                       never a valid answer would only be in the way. #}
+                    <select id="category" name="category"
+                            class="form-input" required>
+                        {% for option in categories %}
+                        <option value="{{ option }}"{% if option == category %} selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="date">Date</label>
+                    {# Pre-filled with today by the view, not by JS -- the
+                       value then survives a failed submit for free, because
+                       the error path re-renders whatever was posted. #}
+                    <input type="date" id="date" name="date"
+                           class="form-input"
+                           value="{{ date or '' }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="description">Description (optional)</label>
+                    {# maxlength is a courtesy, not a rule: the column is TEXT
+                       with no limit and the view enforces no length. #}
+                    <input type="text" id="description" name="description"
+                           class="form-input"
+                           placeholder="Groceries at the local market"
+                           maxlength="200" value="{{ description or '' }}">
+                </div>
+                <button type="submit" class="btn-submit">Save Expense</button>
+            </form>
+        </div>
+
+        {# Cancel sits where register.html puts "Already have an account?" --
+           a full-width .btn-submit leaves no room beside it, and the way out
+           of a form is a secondary action in this design, not a second
+           button competing with the first. #}
+        <p class="auth-switch">
+            Changed your mind?
+            <a href="{{ url_for('profile') }}">Cancel</a>
+        </p>
+
+    </div>
+</section>
+
+{% endblock %}

@@ -1,3 +1,5 @@
+import functools
+import math
 import os
 import sqlite3
 from datetime import datetime
@@ -6,6 +8,7 @@ from flask import Flask, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 
 from database.db import (
+    CATEGORIES,
     create_user,
     get_category_breakdown,
     get_recent_transactions,
@@ -13,6 +16,7 @@ from database.db import (
     get_user_by_email,
     get_user_by_id,
     init_db,
+    insert_expense,
     seed_db,
 )
 
@@ -148,6 +152,82 @@ def day(value):
 
 
 # ------------------------------------------------------------------ #
+# Add expense form helpers                                            #
+# ------------------------------------------------------------------ #
+
+# Presentation-side only, like _clean_date_range() above: the form hands over
+# strings, the query layer wants a number and a canonical date, and something
+# has to say "that will not do" without raising. Both answer None for
+# "unusable", which is the only question the validation chain asks of them.
+
+
+def _as_number(value):
+    """Return `value` parsed as a finite float, or None when it will not.
+
+    A bare float() on "abc" is a ValueError, which would be a 500 for what is
+    really a typo in a text box. "inf" and "nan" parse perfectly well and are
+    rejected anyway: either one stored in expenses.amount would poison every
+    total and percentage on /profile from then on, and no arithmetic on the
+    page could recover.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _as_day(value):
+    """Return `value` as a canonical "YYYY-MM-DD" string, or None.
+
+    Re-formatted through strftime rather than passed through as typed, for
+    exactly the reason _clean_date_range() spells out: strptime happily
+    accepts "2026-8-3", expenses.date is stored zero-padded, and the two
+    compare wrong as strings. A raw pass-through would write a row that the
+    date filter then bounds and orders incorrectly, with nothing to show for
+    it.
+    """
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return None
+
+
+# ------------------------------------------------------------------ #
+# Access control                                                      #
+# ------------------------------------------------------------------ #
+
+
+def login_required(view):
+    """Send an anonymous visitor to the sign-in form instead of the page.
+
+    The inverse of the guard in login() and register(): those two turn a
+    signed-in visitor away, this one turns an anonymous visitor away. A
+    redirect rather than abort(401) because someone who is simply not signed
+    in has an obvious next action, and it is the sign-in form. No ?next=
+    parameter -- an unvalidated one is an open redirect, and nothing here
+    needs it yet.
+
+    Lifted out of profile() in Step 7, which is what the TODO there said to do
+    once a second route wanted the same guard. Wrapping the whole view covers
+    POST as well as GET -- the hole register() and login() both document a
+    GET-only guard leaving open.
+
+    functools.wraps is not cosmetic here: Flask registers a view under its
+    __name__, so without it every decorated route would register as "wrapped"
+    and the second one would raise at import. It also keeps
+    inspect.getsource() reading the real view body, which is what the tests
+    that grep route sources rely on.
+    """
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("user_id"):
+            return redirect(url_for("login"))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+# ------------------------------------------------------------------ #
 # Routes                                                              #
 # ------------------------------------------------------------------ #
 
@@ -275,18 +355,10 @@ def logout():
 
 
 @app.route("/profile")
+@login_required
 def profile():
-    # The inverse of the guard in login() and register(): those two turn a
-    # signed-in visitor away, this one turns an anonymous visitor away. A
-    # redirect rather than abort(401) because someone who is simply not signed
-    # in has an obvious next action, and it is the sign-in form. No ?next=
-    # parameter -- an unvalidated one is an open redirect, and nothing here
-    # needs it yet.
-    # TODO: extract to a login_required decorator once Steps 7-9 add the
-    # expense routes; with one call site it would be dead abstraction today.
-    if not session.get("user_id"):
-        return redirect(url_for("login"))
-
+    # The anonymous-visitor guard that used to sit here is the decorator now:
+    # Step 7 gave it a second call site, which is what its TODO waited for.
     user_id = session["user_id"]
     user = get_user_by_id(user_id)
 
@@ -347,14 +419,95 @@ def privacy():
     return render_template("privacy.html")
 
 
+@app.route("/expenses/add", methods=["GET", "POST"])
+@login_required
+def add_expense():
+    if request.method == "GET":
+        # Today is the overwhelmingly common answer, so the form opens on it.
+        # Filled server-side rather than by JS, and read per request rather
+        # than once at import: a server left running over midnight would
+        # otherwise keep offering the day it booted on.
+        return render_template(
+            "add_expense.html",
+            categories=CATEGORIES,
+            date=datetime.now().strftime("%Y-%m-%d"),
+        )
+
+    # All four are stripped, unlike the passwords in register() and login():
+    # leading and trailing spaces are legitimate password characters and are
+    # meaningless in every field here.
+    amount = request.form.get("amount", "").strip()
+    category = request.form.get("category", "").strip()
+    date = request.form.get("date", "").strip()
+    description = request.form.get("description", "").strip()
+
+    # Parsed up front so the chain below stays flat -- each rule then asks one
+    # question and the two parsers are never run twice on the same string.
+    number = _as_number(amount)
+    day_stamp = _as_day(date)
+
+    # An if/elif chain as in register() and login(): the first failure wins
+    # and later rules never run, so the order the messages appear in is fixed.
+    error = None
+    if not amount or not category or not date:
+        # description is deliberately absent: it is the one optional field.
+        error = "Amount, category and date are required."
+    elif number is None:
+        error = "Enter the amount as a number."
+    elif number <= 0:
+        # Rejected rather than stored, and this is the step that had to decide:
+        # get_category_breakdown() can only promise percentages that sum to 100
+        # and stay in descending order while every amount is positive.
+        error = "Enter an amount greater than zero."
+    elif category not in CATEGORIES:
+        # Checked here and not left to the <select>: a hand-written POST can
+        # otherwise name a category the breakdown chart has no colour for.
+        error = "Choose a category from the list."
+    elif day_stamp is None:
+        error = "Enter the date as YYYY-MM-DD."
+
+    if error is None:
+        try:
+            insert_expense(
+                session["user_id"],
+                number,
+                category,
+                day_stamp,
+                # A blank box means "no description", which is NULL rather
+                # than an empty string -- the column is nullable, and one
+                # spelling of "nothing here" is enough for any column.
+                description or None,
+            )
+        except sqlite3.IntegrityError:
+            # The cookie is signed, so the id is genuine -- but the row it
+            # names can be gone, an account removed while its owner still had
+            # this form open. Foreign keys are on, so the write is refused
+            # rather than orphaned. Same answer profile() gives the same
+            # situation: drop the session so login() cannot bounce them back.
+            session.clear()
+            return redirect(url_for("login"))
+        # Redirect, never render, so a refresh does not resubmit (Post/
+        # Redirect/Get, same as register() and login()). No query parameter:
+        # the new row is its own confirmation, sitting at the top of the table
+        # the visitor lands on.
+        return redirect(url_for("profile"))
+
+    # Everything the visitor typed goes back into the form, so a single bad
+    # field never costs them the other three. Jinja autoescapes it; no |safe.
+    return render_template(
+        "add_expense.html",
+        categories=CATEGORIES,
+        error=error,
+        amount=amount,
+        category=category,
+        date=date,
+        description=description,
+    )
+
+
 # ------------------------------------------------------------------ #
 # Placeholder routes — students will implement these                  #
 # ------------------------------------------------------------------ #
-
-@app.route("/expenses/add")
-def add_expense():
-    return "Add expense — coming in Step 7"
-
 
 @app.route("/expenses/<int:id>/edit")
 def edit_expense(id):

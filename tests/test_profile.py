@@ -589,7 +589,8 @@ def test_profile_no_longer_returns_a_raw_string(client):
 
 def test_the_expense_stubs_are_untouched(client):
     expected = {
-        "/expenses/add": "Add expense — coming in Step 7",
+        # /expenses/add left this table in Step 7, when it became a real
+        # route. Its replacement coverage lives in test_add_expense.py.
         "/expenses/1/edit": "Edit expense — coming in Step 8",
         "/expenses/1/delete": "Delete expense — coming in Step 9",
     }

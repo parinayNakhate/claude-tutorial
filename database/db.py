@@ -6,6 +6,7 @@ seed_db()           -- insert demo data exactly once (safe to call repeatedly)
 get_user_by_email() -- look up a single user by their normalised email
 get_user_by_id()    -- look up a single user by their primary key
 create_user()       -- hash a password and insert a new user
+insert_expense()    -- insert one expense row for a user (Step 7)
 
 Profile page queries, one per section (Step 5):
 
@@ -229,6 +230,42 @@ def create_user(name, email, password):
         )
         # Without this the implicit transaction is discarded by close() and
         # the insert is silently lost.
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def insert_expense(user_id, amount, category, date, description=None):
+    """Insert one expense for `user_id` and return the new row's id.
+
+    Mirrors create_user(): the caller has already validated and normalised
+    every value, so nothing is re-checked here. `amount` is a plain number --
+    the query layer never formats currency, the `rupees` filter in app.py owns
+    the symbol -- and `date` is a zero-padded "YYYY-MM-DD" string, the only
+    form get_recent_transactions() can order by and _date_clause() can compare
+    against.
+
+    `description` is nullable and defaults to None, which is what a blank box
+    on the form means. get_recent_transactions() already squashes that back to
+    "" for display, so no template has to.
+
+    `id` and `created_at` are left to the schema: AUTOINCREMENT and
+    datetime('now') respectively.
+
+    Raises sqlite3.IntegrityError if `user_id` names no row -- get_db() turns
+    foreign keys on, so that constraint is live rather than decorative.
+    """
+    conn = get_db()
+    try:
+        cur = conn.execute(
+            "INSERT INTO expenses "
+            "(user_id, amount, category, date, description) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, amount, category, date, description),
+        )
+        # Without this the implicit transaction is discarded by close() and
+        # the row is silently lost -- the same trap create_user() documents.
         conn.commit()
         return cur.lastrowid
     finally:
