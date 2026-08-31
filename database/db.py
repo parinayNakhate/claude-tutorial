@@ -12,6 +12,10 @@ Profile page queries, one per section (Step 5):
 get_recent_transactions() -- one user's expenses, newest first
 get_summary_stats()       -- one user's total, transaction count and top category
 get_category_breakdown()  -- one user's spending per category, largest first
+
+All three take the same optional inclusive start/end date bounds (Step 6),
+built by the shared private _date_clause(). Omitting both means all time and
+emits the query each one emitted before those arguments existed, byte for byte.
 """
 
 import calendar
@@ -232,7 +236,7 @@ def create_user(name, email, password):
 
 
 # ------------------------------------------------------------------ #
-# Profile page queries -- Step 5                                      #
+# Profile page queries -- Steps 5-6                                   #
 # ------------------------------------------------------------------ #
 
 # One helper per section of /profile. They are deliberately independent --
@@ -259,7 +263,47 @@ def _category_totals(rows):
     return sorted(totals.items(), key=lambda pair: pair[1], reverse=True)
 
 
-def get_recent_transactions(user_id, limit=10):
+def _date_clause(start, end):
+    """Return the SQL and parameters for an optional date window.
+
+    Gives back a (sql, params) pair: `sql` is a fragment to append directly
+    after "WHERE user_id = ?" -- it opens with its own space and ends without
+    one -- and `params` are the values filling its placeholders, in the same
+    order, ready to concatenate into the caller's tuple.
+
+    With neither bound it returns ("", ()), so each query below emits the exact
+    string and the exact tuple it emitted before these arguments existed. That
+    is the whole contract: /profile with no query string is all time and must
+    stay untouched, and several Step 5 tests count rows and bars against the
+    full seeded set.
+
+    Both bounds are inclusive -- someone asking for 1 to 31 August means the
+    31st too. expenses.date is TEXT in zero-padded YYYY-MM-DD, which sorts
+    lexicographically in the same order it sorts chronologically, so plain
+    string comparison is the correct comparison and no date() conversion is
+    needed on either side of the operator.
+
+    Shared by all three queries rather than written out in each, for the same
+    reason _category_totals() is shared: three copies of one clause can drift,
+    and a page whose bars cover a different window than its headline total is
+    worse than a page that cannot filter at all.
+
+    A falsy bound -- None or "" -- means no bound on that side, so a caller
+    handing an empty form field straight through gets the unfiltered query
+    rather than one that matches nothing.
+    """
+    sql = ""
+    params = ()
+    if start:
+        sql += " AND date >= ?"
+        params += (start,)
+    if end:
+        sql += " AND date <= ?"
+        params += (end,)
+    return sql, params
+
+
+def get_recent_transactions(user_id, limit=10, start=None, end=None):
     """Return `user_id`'s most recent expenses, newest first.
 
     One dict per expense with exactly the four keys profile.html reads:
@@ -269,20 +313,35 @@ def get_recent_transactions(user_id, limit=10):
 
     Returns [] for a user with no expenses; the template's {% else %} branch
     renders the empty state.
+
+    `start` and `end` are optional inclusive YYYY-MM-DD bounds. They narrow
+    which rows are eligible; they do not change the ordering. The caller
+    validates them -- this layer only binds them.
+
+    A `limit` of None lifts the cap entirely. /profile passes None once a
+    window is active: a table capped at ten rows underneath a headline
+    counting every row in the window is a page arguing with itself, and a
+    window the visitor drew themselves is already bounded.
     """
+    clause, date_params = _date_clause(start, end)
+    # date is a bare YYYY-MM-DD string with no time component, so several rows
+    # routinely share a day. id DESC breaks those ties by insertion order --
+    # without it SQLite may hand back equal dates in any order and the table
+    # would reshuffle itself between two renders of identical data.
+    sql = (
+        "SELECT id, amount, category, date, description "
+        "FROM expenses WHERE user_id = ?"
+        + clause
+        + " ORDER BY date DESC, id DESC"
+    )
+    params = (user_id,) + date_params
+    if limit is not None:
+        sql += " LIMIT ?"
+        params += (limit,)
+
     conn = get_db()
     try:
-        # date is a bare YYYY-MM-DD string with no time component, so several
-        # rows routinely share a day. id DESC breaks those ties by insertion
-        # order -- without it SQLite may hand back equal dates in any order
-        # and the table would reshuffle itself between two renders of
-        # identical data.
-        rows = conn.execute(
-            "SELECT id, amount, category, date, description "
-            "FROM expenses WHERE user_id = ? "
-            "ORDER BY date DESC, id DESC LIMIT ?",
-            (user_id, limit),
-        ).fetchall()
+        rows = conn.execute(sql, params).fetchall()
         # Built inside the try for the same reason as get_user_by_email():
         # the rows are materialised while the connection is still open.
         # description is nullable, and a None would reach Jinja and print the
@@ -301,7 +360,7 @@ def get_recent_transactions(user_id, limit=10):
         conn.close()
 
 
-def get_summary_stats(user_id):
+def get_summary_stats(user_id, start=None, end=None):
     """Return the three headline stats profile.html reads.
 
     Exactly three keys, named for the template: `total` (number, summed --
@@ -309,16 +368,22 @@ def get_summary_stats(user_id):
 
     An account with no expenses gets zeros and an em dash rather than an
     exception: a brand-new user landing on /profile is the normal first
-    experience, not an edge case.
+    experience, not an edge case. A window that happens to contain nothing
+    gets exactly the same three values, for the same reason.
+
+    `start` and `end` are the same optional inclusive YYYY-MM-DD bounds
+    get_recent_transactions() takes. All three numbers then describe the
+    window rather than the account.
     """
+    clause, date_params = _date_clause(start, end)
     conn = get_db()
     try:
         # Only the two columns the stats are derived from. The transaction
         # list is its own query, so pulling dates and descriptions through
         # here as well would buy nothing.
         rows = conn.execute(
-            "SELECT amount, category FROM expenses WHERE user_id = ?",
-            (user_id,),
+            "SELECT amount, category FROM expenses WHERE user_id = ?" + clause,
+            (user_id,) + date_params,
         ).fetchall()
         # Everything below runs inside the try for the same reason as
         # get_user_by_email(): the rows are materialised while the connection
@@ -339,7 +404,7 @@ def get_summary_stats(user_id):
         conn.close()
 
 
-def get_category_breakdown(user_id):
+def get_category_breakdown(user_id, start=None, end=None):
     """Return one bar per category for `user_id`, largest first.
 
     One dict per category with the three keys profile.html reads:
@@ -353,14 +418,20 @@ def get_category_breakdown(user_id):
     Whenever the total is above zero the percents sum to exactly 100: the
     bars claim to cover the whole of the spending, so they have to. Returns
     [] for a user with no expenses.
+
+    `start` and `end` are the same optional inclusive YYYY-MM-DD bounds
+    get_recent_transactions() takes. The percentages are recomputed over
+    whatever the window contains, so they still sum to exactly 100 within it
+    -- they are shares of the filtered spending, not of all time.
     """
+    clause, date_params = _date_clause(start, end)
     conn = get_db()
     try:
         # Only the two columns the bars are built from. The date and the
         # description belong to the transaction table, not the chart.
         rows = conn.execute(
-            "SELECT amount, category FROM expenses WHERE user_id = ?",
-            (user_id,),
+            "SELECT amount, category FROM expenses WHERE user_id = ?" + clause,
+            (user_id,) + date_params,
         ).fetchall()
         # Aggregated inside the try, as in get_user_by_email(): the rows are
         # consumed while the connection is still open.

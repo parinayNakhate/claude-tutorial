@@ -65,7 +65,86 @@
 }
 
 /* ---------------------------------- */
-/* 2. Summary stats                    */
+/* 2. Date filter                      */
+/* ---------------------------------- */
+
+/* The card recipe of .profile-stat, one step quieter: --paper-warm and
+   --border-soft, so the filter reads as a control strip above the data
+   rather than as another panel of it. Layout only -- the input border, the
+   focus ring and both buttons come from style.css. .form-group is
+   deliberately not reused: its 1.25rem margin-bottom is built for the
+   stacked auth forms, and this is a single row. */
+.profile-filter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 1rem;
+    background: var(--paper-warm);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-md);
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.profile-filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    /* Share the row, but never shrink past a legible date box: the native
+       control has a fixed-width spinner that will not compress. */
+    flex: 1 1 11rem;
+    min-width: 11rem;
+}
+
+/* Same treatment as .profile-stat-label, so the two rows of small caps above
+   the fold agree. */
+.profile-filter-field label {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--ink-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+/* .form-input is a full-width auth-form field; inside a flex column that is
+   exactly right, only the type size needs to come down to table scale. */
+.profile-filter .form-input {
+    font-size: 0.9rem;
+}
+
+.profile-filter-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+/* .btn-primary and .btn-ghost carry 0.65rem 1.5rem, a hair taller than
+   .form-input; trimmed here so Apply, Clear and the two date boxes sit on
+   one flat baseline. */
+.profile-filter-actions .btn-primary,
+.profile-filter-actions .btn-ghost {
+    padding: 0.6rem 1.25rem;
+}
+
+/* Both messages take a line of their own: they come after the fields have
+   claimed the row, and flex-wrap drops them onto the next one. */
+.profile-filter-error,
+.profile-filter-caption {
+    width: 100%;
+    margin: 0;
+    font-size: 0.85rem;
+}
+
+.profile-filter-error {
+    color: var(--danger);
+}
+
+.profile-filter-caption {
+    color: var(--ink-muted);
+}
+
+/* ---------------------------------- */
+/* 3. Summary stats                    */
 /* ---------------------------------- */
 
 .profile-stats {
@@ -122,7 +201,7 @@
 }
 
 /* ---------------------------------- */
-/* 3. Transaction table                */
+/* 4. Transaction table                */
 /* ---------------------------------- */
 
 /* The project has no table styling anywhere, so this is all new. The wrapper
@@ -201,7 +280,7 @@
 .profile-badge-other         { background: var(--paper-warm);     color: var(--ink-muted); }
 
 /* ---------------------------------- */
-/* 4. Category breakdown bars          */
+/* 5. Category breakdown bars          */
 /* ---------------------------------- */
 
 .profile-breakdown {
@@ -273,6 +352,21 @@
     }
 
     .profile-card { padding: 1.25rem; }
+
+    /* Two 11rem fields plus two buttons overrun the row well before 600px,
+       and flex-wrap would leave Apply stranded alone on a line. Stacked,
+       every control gets the full width instead. */
+    .profile-filter {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 1rem 1.25rem;
+    }
+
+    .profile-filter-actions .btn-primary,
+    .profile-filter-actions .btn-ghost {
+        flex: 1;
+        text-align: center;
+    }
 
     /* Labels above the bars: 110px of category name plus a track plus an
        amount does not fit, and squeezing the track to nothing loses the

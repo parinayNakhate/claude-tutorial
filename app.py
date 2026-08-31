@@ -66,6 +66,57 @@ def _member_since(created_at):
     return created_at
 
 
+def _clean_date_range(start, end):
+    """Validate the two optional /profile date bounds.
+
+    Takes the raw query-string values and returns (start, end, error): each
+    bound is either a canonical "YYYY-MM-DD" string safe to hand to the query
+    layer, or None meaning no bound on that side; `error` is a message for the
+    template, or None when there is nothing to say.
+
+    Presentation-side only, like _member_since() -- it parses text and never
+    reaches for the database.
+
+    Each side is parsed on its own, so ?start= alone is a perfectly good
+    open-ended-forward range, and one unusable value does not throw away a
+    usable one beside it. A bound that will not parse is dropped rather than
+    guessed at, and says so: silently ignoring it would show all-time numbers
+    under a filter the visitor believes is applied.
+
+    Re-formatted through strftime rather than passed through as typed: strptime
+    happily accepts "2026-8-3", expenses.date is stored zero-padded, and the
+    two compare wrong as strings -- "2026-8-3" sorts after "2026-12-31" -- so
+    the raw form would quietly under-report with no error to show for it.
+
+    A range whose start falls after its end is thrown away whole. It is
+    answerable -- it just always answers "nothing" -- but an empty page under a
+    range nobody could have meant reads as a broken one.
+    """
+    cleaned = []
+    error = None
+    for value in (start, end):
+        if not value:
+            # Missing, or a form submitted with the box left blank. Both mean
+            # "no bound here", and neither is a mistake worth reporting.
+            cleaned.append(None)
+            continue
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d")
+        except (TypeError, ValueError):
+            cleaned.append(None)
+            error = "Enter dates as YYYY-MM-DD."
+            continue
+        cleaned.append(parsed.strftime("%Y-%m-%d"))
+
+    clean_start, clean_end = cleaned
+    if clean_start and clean_end and clean_start > clean_end:
+        # Both parsed, so both are zero-padded and a plain string comparison
+        # orders them correctly.
+        return None, None, "The start date cannot be after the end date."
+
+    return clean_start, clean_end, error
+
+
 @app.template_filter("rupees")
 def rupees(value):
     """Format a number as INR with thousands separators: 6484.0 -> ₹6,484.00.
@@ -248,16 +299,41 @@ def profile():
         session.clear()
         return redirect(url_for("login"))
 
-    # One call per section of the page. The name is read from the session by
-    # the template itself, exactly as base.html already does -- passing it
-    # here would just shadow the same value.
+    # Both bounds are optional and default to empty rather than None, so the
+    # template can echo them back into the form without a filter. The raw
+    # values go to the form; only the validated pair reaches the query layer.
+    start = request.args.get("start", "")
+    end = request.args.get("end", "")
+    clean_start, clean_end, filter_error = _clean_date_range(start, end)
+
+    # A window the visitor drew themselves is already bounded, so the ten-row
+    # cap comes off inside it -- otherwise the table would show ten rows
+    # underneath a headline counting the whole window. Unfiltered, the cap
+    # stays: an account's whole history has no bound at all.
+    row_cap = None if (clean_start or clean_end) else 10
+
+    # One call per section of the page, and all three are given the same
+    # validated window -- that is what stops the stats, the bars and the table
+    # from ever describing different spans of time. With no query string both
+    # bounds are None and these are the three calls Step 5 made. The name is
+    # read from the session by the template itself, exactly as base.html
+    # already does -- passing it here would just shadow the same value.
     return render_template(
         "profile.html",
         email=user["email"],
         member_since=_member_since(user["created_at"]),
-        expenses=get_recent_transactions(user_id),
-        summary=get_summary_stats(user_id),
-        breakdown=get_category_breakdown(user_id),
+        expenses=get_recent_transactions(
+            user_id, limit=row_cap, start=clean_start, end=clean_end
+        ),
+        summary=get_summary_stats(user_id, start=clean_start, end=clean_end),
+        breakdown=get_category_breakdown(
+            user_id, start=clean_start, end=clean_end
+        ),
+        start=start,
+        end=end,
+        applied_start=clean_start,
+        applied_end=clean_end,
+        filter_error=filter_error,
     )
 
 

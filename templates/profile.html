@@ -8,8 +8,9 @@
 
 {% block content %}
 
-{# The name is the one live value on this page -- everything else is static
-   until Step 5. Split once here so the heading and the avatar cannot drift. #}
+{# The name is the one value on this page that does not come from a query --
+   it is read straight off the session. Split once here so the heading and the
+   avatar cannot drift. #}
 {% set name_parts = (session.user_name or '').split() %}
 {% set initials = (name_parts[0][0] ~ name_parts[-1][0]) if name_parts | length > 1
                   else (name_parts[0][0] if name_parts else '?') %}
@@ -27,7 +28,49 @@
             </div>
         </header>
 
-        <!-- 2. The headline numbers -->
+        <!-- 2. Narrowing the window -->
+        {# Every section below reads the same validated range, so the stats,
+           the table and the bars can never describe different windows. GET,
+           not POST: the range belongs in the URL, so a filtered view can be
+           bookmarked, shared and reloaded without a resubmit warning. #}
+        <form class="profile-filter" method="get" action="{{ url_for('profile') }}">
+            <div class="profile-filter-field">
+                <label for="filter-start">From</label>
+                <input type="date" id="filter-start" name="start"
+                       class="form-input" value="{{ start or '' }}">
+            </div>
+            <div class="profile-filter-field">
+                <label for="filter-end">To</label>
+                <input type="date" id="filter-end" name="end"
+                       class="form-input" value="{{ end or '' }}">
+            </div>
+            <div class="profile-filter-actions">
+                <button type="submit" class="btn-primary">Apply</button>
+                {% if start or end %}
+                {# A link, not <button type="reset">: reset would blank the two
+                   boxes and leave the filtered page still on screen. #}
+                <a class="btn-ghost" href="{{ url_for('profile') }}">Clear</a>
+                {% endif %}
+            </div>
+            {% if filter_error %}
+            <p class="profile-filter-error">{{ filter_error }}</p>
+            {% endif %}
+            {% if applied_start or applied_end %}
+            <p class="profile-filter-caption">
+                {% if applied_start and applied_end %}
+                Showing {{ applied_start | day }} to {{ applied_end | day }}
+                {% elif applied_start %}
+                Showing {{ applied_start | day }} onwards
+                {% else %}
+                Showing everything up to {{ applied_end | day }}
+                {% endif %}
+                — the totals, the bars and the transactions below all cover
+                this range.
+            </p>
+            {% endif %}
+        </form>
+
+        <!-- 3. The headline numbers -->
         <div class="profile-stats">
             <div class="profile-stat">
                 <span class="profile-stat-label">Total spent</span>
@@ -43,7 +86,7 @@
             </div>
         </div>
 
-        <!-- 3. Recent activity -->
+        <!-- 4. Recent activity -->
         <div class="profile-card">
             <h2 class="profile-card-title">Recent transactions</h2>
             <div class="profile-table-wrap">
@@ -85,7 +128,7 @@
             </div>
         </div>
 
-        <!-- 4. Where the money went -->
+        <!-- 5. Where the money went -->
         <div class="profile-card">
             <h2 class="profile-card-title">Spending by category</h2>
             <div class="profile-breakdown">
