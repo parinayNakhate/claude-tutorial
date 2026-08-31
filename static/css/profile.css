@@ -200,6 +200,25 @@
     margin-bottom: 1.25rem;
 }
 
+/* The title and the one action belonging to this card share a row, so Add
+   Expense sits with the table it adds to rather than floating above the page.
+   Wraps rather than getting its own breakpoint: two items and a 1rem gap fit
+   until the words themselves run out of room, wherever that lands. */
+.profile-card-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+/* The gap below the title is the row's job now -- left on the heading it
+   would stack with the row's own margin and open a second gap. */
+.profile-card-head .profile-card-title {
+    margin-bottom: 0;
+}
+
 /* ---------------------------------- */
 /* 4. Transaction table                */
 /* ---------------------------------- */

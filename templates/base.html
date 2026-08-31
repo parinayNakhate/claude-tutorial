@@ -20,6 +20,14 @@
             </a>
             <div class="nav-links">
                 {% if session.user_id %}
+                {# Action, then identity, then the way out. A plain nav link,
+                   so the @media (max-width: 600px) rule in style.css hides it
+                   below that width -- the intended trade: /profile is where a
+                   signed-in visitor lands and its own "Add Expense" button is
+                   the mobile path, .nav-cta is reserved for conversion, and a
+                   fourth :not() in that selector is a cost the whole nav
+                   pays. #}
+                <a href="{{ url_for('add_expense') }}">Add Expense</a>
                 <a href="{{ url_for('profile') }}" class="nav-user">{{ session.user_name }}</a>
                 <a href="{{ url_for('logout') }}" class="nav-signout">Sign out</a>
                 {% else %}

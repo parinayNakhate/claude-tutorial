@@ -173,10 +173,10 @@ def test_form_actions_resolve_through_url_for(app):
 
 def test_stub_routes_are_untouched(client):
     expected = {
-        # /logout left this table in Step 3 and /profile in Step 4, each when
-        # it became a real route. Their replacement coverage lives in
-        # test_login.py and test_profile.py respectively.
-        "/expenses/add": "Add expense — coming in Step 7",
+        # /logout left this table in Step 3, /profile in Step 4 and
+        # /expenses/add in Step 7, each when it became a real route. Their
+        # replacement coverage lives in test_login.py, test_profile.py and
+        # test_add_expense.py respectively.
         "/expenses/1/edit": "Edit expense — coming in Step 8",
         "/expenses/1/delete": "Delete expense — coming in Step 9",
     }

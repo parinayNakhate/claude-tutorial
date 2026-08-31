@@ -88,7 +88,14 @@
 
         <!-- 4. Recent activity -->
         <div class="profile-card">
-            <h2 class="profile-card-title">Recent transactions</h2>
+            <div class="profile-card-head">
+                <h2 class="profile-card-title">Recent transactions</h2>
+                {# An <a>, not a <button>: it navigates to a page of its own
+                   rather than submitting anything. This is also the only way
+                   into the form that survives the 600px nav rule. #}
+                <a class="btn-primary"
+                   href="{{ url_for('add_expense') }}">Add Expense</a>
+            </div>
             <div class="profile-table-wrap">
                 <table class="profile-table">
                     <thead>
